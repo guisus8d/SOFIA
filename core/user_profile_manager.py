@@ -1,0 +1,330 @@
+import re
+from datetime import datetime
+from typing import Optional, List, Dict
+
+from models.user_profile import UserProfile
+from models.interaction import Interaction
+from storage.database import Database
+from utils.text_analyzer import TextAnalyzer
+from utils.logger import logger
+from config import settings
+from core.personality_core import PERSONALITY_CORE
+
+
+class UserProfileManager:
+    """
+    Gestiona perfiles con:
+    - Memoria ponderada con decaimiento
+    - Evolución de personalidad
+    - Sistema de daño relacional persistente
+    """
+
+    def __init__(self, db: Database):
+        self.db = db
+        self.analyzer = TextAnalyzer()
+        self.cache: Dict[str, UserProfile] = {}
+
+        self.fact_patterns = [
+            (re.compile(r'\b(?:soy|soy un|soy una)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,4})\b', re.IGNORECASE), "soy {0}"),
+            (re.compile(r'\b(?:estudio|estoy estudiando)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,4})\b', re.IGNORECASE), "estudia {0}"),
+            (re.compile(r'\b(?:trabajo en|trabajo de)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,4})\b', re.IGNORECASE), "trabaja en {0}"),
+            (re.compile(r'\b(?:me gusta|me encanta)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,4})\b', re.IGNORECASE), "le gusta {0}"),
+            (re.compile(r'\b(?:tengo un|tengo una)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,4})\b', re.IGNORECASE), "tiene {0}"),
+        ]
+
+        self.stopwords = {
+            "muy", "bastante", "poco", "algo",
+            "un", "una", "unos", "unas",
+            "el", "la", "los", "las"
+        }
+
+    # ------------------------------------------------------------
+    # CARGA / CREACIÓN
+    # ------------------------------------------------------------
+
+    async def get_or_create_profile(self, user_id: str) -> UserProfile:
+        if user_id in self.cache:
+            return self.cache[user_id]
+
+        profile = self.db.load_user_profile(user_id)
+
+        if not profile:
+            profile = UserProfile(
+                user_id=user_id,
+                first_seen=datetime.now(),
+                last_seen=datetime.now()
+            )
+            self.db.save_user_profile(profile)
+            logger.info(f"Nuevo perfil creado para {user_id}")
+
+        self.cache[user_id] = profile
+        return profile
+
+    # ------------------------------------------------------------
+    # ACTUALIZACIÓN PRINCIPAL
+    # ------------------------------------------------------------
+
+    async def update_profile_from_interaction(
+        self,
+        profile: UserProfile,
+        interaction: Interaction
+    ):
+        """
+        Actualiza:
+        - Hechos (con decaimiento)
+        - Rasgos dinámicos
+        - Daño relacional
+        """
+
+        # 1️⃣ Decaimiento de hechos
+        self._apply_fact_decay(profile, interaction.timestamp)
+
+        # 2️⃣ Contadores
+        profile.interaction_count += 1
+        profile.last_seen = interaction.timestamp
+        if not profile.first_seen:
+            profile.first_seen = interaction.timestamp
+
+        # 3️⃣ Estilo comunicación
+        style = self._detect_communication_style(interaction.message)
+        if style:
+            profile.communication_style = style
+
+        # 4️⃣ Temas
+        keywords = self.analyzer.extract_keywords(interaction.message, max_words=3)
+        current_topics = set(profile.topics)
+        current_topics.update(keywords)
+        profile.topics = list(current_topics)[:10]
+
+        # 5️⃣ Hechos importantes
+        detected_facts = self._extract_facts(interaction.message)
+        for fact in detected_facts:
+            increment = 1.0
+            if interaction.sentiment is not None and abs(interaction.sentiment) > 0.7:
+                increment += 0.5
+
+            profile.important_facts[fact] = (
+                profile.important_facts.get(fact, 0.0) + increment
+            )
+
+        if len(profile.important_facts) > 50:
+            sorted_facts = sorted(
+                profile.important_facts.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            profile.important_facts = dict(sorted_facts[:50])
+
+        # ------------------------------------------------------------
+        # 🆕 SISTEMA DE DAÑO RELACIONAL (v0.3.4)
+        # ------------------------------------------------------------
+
+        if interaction.sentiment is not None:
+
+            # 🔴 Incremento por negatividad
+            if interaction.sentiment < -0.3:
+                damage_increment = abs(interaction.sentiment) * 2
+                profile.relationship_damage += damage_increment
+
+            # 🟢 Reparación emocional (dependiente de la confianza actual)
+            repair_mult = self.analyzer.get_repair_multiplier(interaction.message)
+            if repair_mult > 1.0 and interaction.sentiment >= 0:
+                trust = profile.emotional_state.trust
+
+                # Factor según confianza actual
+                if trust > 70:
+                    trust_factor = 1.2
+                elif trust < 40:
+                    trust_factor = 0.5
+                else:
+                    trust_factor = 1.0
+
+                reduction = repair_mult * 1.5 * trust_factor
+
+                profile.relationship_damage = max(
+                    0.0,
+                    profile.relationship_damage - reduction
+                )
+
+        # ------------------------------------------------------------
+        # 🆕 EVOLUCIÓN DE PERSONALIDAD
+        # ------------------------------------------------------------
+
+        if interaction.sentiment is not None:
+
+            # Muy positivo → attachment crece
+            if interaction.sentiment > 0.5:
+                profile.personality_offsets["attachment"] += 0.5
+
+            # Muy negativo → boundaries suben
+            elif interaction.sentiment < -0.5:
+                profile.personality_offsets["boundary_strength"] += 0.8
+                profile.personality_offsets["attachment"] -= 0.5
+
+        # Clamp offsets
+        for k in profile.personality_offsets:
+            profile.personality_offsets[k] = max(
+                -30.0,
+                min(30.0, profile.personality_offsets[k])
+            )
+
+        # Guardar
+        self.db.save_user_profile(profile)
+        self.cache[profile.user_id] = profile
+
+    # ------------------------------------------------------------
+    # DECAY
+    # ------------------------------------------------------------
+
+    def _apply_fact_decay(self, profile: UserProfile, current_time: datetime):
+        if not profile.last_seen:
+            return
+
+        days_passed = max(
+            0,
+            (current_time - profile.last_seen).total_seconds() / 86400
+        )
+
+        if days_passed == 0:
+            return
+
+        decay_factor = settings.FACT_DECAY_PER_DAY ** days_passed
+
+        for fact in list(profile.important_facts.keys()):
+            new_weight = profile.important_facts[fact] * decay_factor
+
+            if new_weight < settings.FACT_MIN_WEIGHT:
+                del profile.important_facts[fact]
+            else:
+                profile.important_facts[fact] = new_weight
+
+    # ------------------------------------------------------------
+    # EXTRACCIÓN DE HECHOS
+    # ------------------------------------------------------------
+
+    def _extract_facts(self, message: str) -> List[str]:
+        detected = []
+
+        for pattern, template in self.fact_patterns:
+            matches = pattern.findall(message)
+
+            for match in matches:
+                if isinstance(match, tuple):
+                    match = match[0]
+
+                fact_text = match.strip().lower()
+
+                words = fact_text.split()
+                filtered_words = [w for w in words if w not in self.stopwords]
+
+                if not filtered_words:
+                    continue
+
+                fact_text = " ".join(filtered_words[:5])
+                fact = template.format(fact_text)
+
+                detected.append(fact)
+
+        return detected
+
+    # ------------------------------------------------------------
+    # ESTILO
+    # ------------------------------------------------------------
+
+    def _detect_communication_style(self, message: str) -> Optional[str]:
+        msg = message.lower()
+
+        technical_words = {
+            "código", "función", "variable", "bug",
+            "python", "javascript", "api",
+            "servidor", "base de datos"
+        }
+
+        if any(w in msg for w in technical_words):
+            return "technical"
+
+        humor = {"jaja", "jeje", "lol", "😂", "😆"}
+        if any(w in msg for w in humor):
+            return "humorous"
+
+        aggressive = {"idiota", "estúpido", "imbécil", "tonto", "😡"}
+        if any(w in msg for w in aggressive):
+            return "aggressive"
+
+        return None
+
+    # ------------------------------------------------------------
+    # MODIFICADORES DE COMPORTAMIENTO
+    # ------------------------------------------------------------
+
+    def get_behavior_modifiers(self, profile: UserProfile) -> dict:
+
+        effective_traits = {}
+        for k, base in PERSONALITY_CORE.items():
+            offset = profile.personality_offsets.get(k, 0.0)
+            effective_traits[k] = max(
+                0.0,
+                min(100.0, base + offset)
+            )
+
+        top_facts = dict(sorted(
+            profile.important_facts.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:5])
+
+        modifiers = {
+            "tone": profile.communication_style,
+            "empathy_bonus": 0.0,
+            "hostility_threshold": 20.0,
+            "patience": 1.0,
+            "ignore_threshold_adjust": 0.0,
+            "effective_traits": effective_traits,
+            "important_facts": top_facts
+        }
+
+        # ------------------------------------------------------------
+        # Historial + confianza
+        # ------------------------------------------------------------
+
+        if profile.interaction_count > 10 and profile.emotional_state.trust > 70:
+            modifiers["empathy_bonus"] += 0.2
+            modifiers["hostility_threshold"] = 10.0
+
+        if profile.emotional_state.trust < 30:
+            modifiers["empathy_bonus"] -= 0.1
+            modifiers["hostility_threshold"] = 30.0
+
+        # ------------------------------------------------------------
+        # 🆕 Daño relacional
+        # ------------------------------------------------------------
+
+        damage = profile.relationship_damage
+
+        if damage > 5:
+            modifiers["hostility_threshold"] = 25.0
+            modifiers["empathy_bonus"] -= 0.2
+            modifiers["ignore_threshold_adjust"] = 0.2
+
+        elif damage > 2:
+            modifiers["hostility_threshold"] = 22.0
+            modifiers["empathy_bonus"] -= 0.1
+            modifiers["ignore_threshold_adjust"] = 0.1
+
+        # ------------------------------------------------------------
+        # Rasgos efectivos
+        # ------------------------------------------------------------
+
+        boundary = effective_traits.get("boundary_strength", 70)
+        sensitivity = effective_traits.get("sensitivity", 50)
+        depth = effective_traits.get("depth", 65)
+
+        if boundary > 60:
+            modifiers["ignore_threshold_adjust"] = 0.1
+        elif boundary < 40:
+            modifiers["ignore_threshold_adjust"] = -0.1
+
+        modifiers["empathy_bonus"] += (sensitivity - 50) / 500
+        modifiers["patience"] += (depth - 50) / 100
+
+        return modifiers

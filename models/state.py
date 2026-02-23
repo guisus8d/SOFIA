@@ -14,8 +14,8 @@ class Emotion(Enum):
 class EmotionalState:
     """Estado emocional actual del bot"""
     primary_emotion: Emotion = Emotion.NEUTRAL
-    energy: float = 100.0      # 0-100, qué tan activo/enérgico
-    trust: float = 100.0       # 0-100, confianza general en usuarios
+    energy: float = 50.0      # ← FIX: era 100.0, ahora 50.0 (más realista para usuario nuevo)
+    trust: float = 50.0       # ← FIX: era 100.0, ahora 50.0
     last_updated: Optional[float] = None  # timestamp
 
     def to_dict(self) -> dict:

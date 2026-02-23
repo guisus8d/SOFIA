@@ -1,6 +1,7 @@
 # Entorno virtual
 venv/
 env/
+data/bot_data.db
 
 # Archivos Python
 __pycache__/

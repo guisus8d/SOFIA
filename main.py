@@ -1,73 +1,97 @@
 # main.py
+# ============================================================
+# SocialBot v0.5.0 — Memoria Episódica
+# Cambios:
+#   - Integra SessionManager al arrancar y al cerrar
+#   - Sofía saluda según el historial del usuario
+#   - Al escribir 'salir' guarda la sesión automáticamente
+# ============================================================
+
 import asyncio
-from datetime import datetime
 from utils.logger import logger
-from utils.text_analyzer import TextAnalyzer
 from storage.database import Database
 from core.memory import Memory
 from core.emotion_engine import EmotionEngine
 from core.decision_engine import DecisionEngine
-from models.state import EmotionalState
+from core.user_profile_manager import UserProfileManager
+from core.session_manager import SessionManager
 from config import settings
+
 
 class SocialBot:
     def __init__(self):
-        self.db = Database(str(settings.DATABASE_PATH))
-        self.memory = Memory(self.db)
-        # Cargar último estado emocional
-        saved_state = self.db.load_emotional_state()
-        self.emotion = EmotionEngine(saved_state)
-        self.decision = DecisionEngine()
-        self.analyzer = TextAnalyzer()
-        logger.info(f"Bot inicializado. Estado: {self.emotion.state.primary_emotion.value}")
-    
+        self.db              = Database(str(settings.DATABASE_PATH))
+        self.memory          = Memory(self.db)
+        self.profile_manager = UserProfileManager(self.db)
+        self.emotion_engine  = EmotionEngine()
+        self.decision        = DecisionEngine()
+        self.session_manager = SessionManager(self.db)   # 🆕
+        logger.info("Bot inicializado.")
+
     async def process_message(self, user_id: str, message: str) -> str:
-        """Procesa un mensaje y retorna respuesta"""
         logger.info(f"Mensaje de {user_id}: {message}")
-        
-        # Decidir respuesta
+
+        profile   = await self.profile_manager.get_or_create_profile(user_id)
+        modifiers = self.profile_manager.get_behavior_modifiers(profile)
+
         decision = await self.decision.decide_response(
-            user_id, message, self.emotion.state, self.memory
+            user_id=user_id,
+            message=message,
+            emotion=profile.emotional_state,
+            memory=self.memory,
+            profile_modifiers=modifiers
         )
-        
-        interaction = decision["interaction"]
-        
-        # Actualizar emoción con esta interacción
-        new_state = await self.emotion.process_interaction(interaction, self.memory)
-        
-        # Actualizar la emoción final en la interacción
-        interaction.emotion_after = new_state.primary_emotion.value
-        
-        # Guardar en memoria
+
+        interaction      = decision["interaction"]
+        repair_multiplier = self.decision.analyzer.get_repair_multiplier(message)
+
+        new_state = await self.emotion_engine.process_interaction_for_state(
+            state=profile.emotional_state,
+            interaction=interaction,
+            memory=self.memory,
+            repair_multiplier=repair_multiplier,
+            relationship_damage=profile.relationship_damage
+        )
+
+        interaction.emotion_after  = new_state.primary_emotion.value
+        profile.emotional_state    = new_state
+
         await self.memory.remember(interaction)
-        
-        # Guardar estado en BD
-        self.db.save_emotional_state(new_state)
-        
+        await self.profile_manager.update_profile_from_interaction(profile, interaction)
+
         return decision["response"]
-    
+
     async def run_cli(self):
-        """Bucle de consola para pruebas"""
         print(f"\n--- {settings.BOT_NAME} v{settings.VERSION} ---")
         print("Escribe 'salir' para terminar.\n")
-        
-        user_id = "test_user_1"  # Usuario fijo para prueba
-        
+
+        user_id = "test_user_1"
+
+        # 🆕 Saludo con memoria episódica
+        greeting = self.session_manager.get_greeting(user_id)
+        print(f"Sofía: {greeting}\n")
+
         while True:
             user_input = input("Tú: ")
             if user_input.lower() in ["salir", "exit", "quit"]:
+                # 🆕 Guardar sesión al cerrar
+                profile = await self.profile_manager.get_or_create_profile(user_id)
+                self.session_manager.save_session(user_id, profile)
+                print("Sofía: ¡Hasta luego! 😊")
                 break
-            
+
             response = await self.process_message(user_id, user_input)
-            print(f"Bot: {response}")
-            
-            # Mostrar estado actual (debug)
-            estado = self.emotion.state
-            print(f"[{estado.primary_emotion.value} | energía:{estado.energy:.1f} confianza:{estado.trust:.1f}]\n")
+            print(f"Sofía: {response}")
+
+            profile = await self.profile_manager.get_or_create_profile(user_id)
+            estado  = profile.emotional_state
+            print(f"[{estado.primary_emotion.value} | energía:{estado.energy:.1f} confianza:{estado.trust:.1f} daño:{profile.relationship_damage:.2f}]\n")
+
 
 async def main():
     bot = SocialBot()
     await bot.run_cli()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

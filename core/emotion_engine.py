@@ -1,88 +1,141 @@
 # core/emotion_engine.py
+# ============================================================
+# SocialBot v0.6.3
+# FIX 1: Delta máximo de confianza/energía por mensaje = 3.0
+#         Evita que un solo "te quiero" suba 15 puntos.
+# FIX 2: Umbrales de emoción más realistas + estados intermedios
+#         Antes: happy requería e>80 AND t>70 (casi imposible)
+#         Ahora: hay 5 zonas más naturales
+# ============================================================
+
 from typing import Optional
 from models.state import EmotionalState, Emotion
 from models.interaction import Interaction
 from core.memory import Memory
 from utils.logger import logger
+from config import settings
 import time
 
+MAX_DELTA_PER_MESSAGE = 3.0   # tope de cambio por mensaje (energy y trust)
+
+
 class EmotionEngine:
-    """Gestiona el estado emocional del bot"""
-    
+    """Gestiona estados emocionales (global o por usuario)"""
+
     def __init__(self, initial_state: Optional[EmotionalState] = None):
         self.state = initial_state or EmotionalState()
-        self.mood_decay = 0.95  # factor de decaimiento por hora (simulado)
+        self.mood_decay = 0.95
         self.last_update_time = time.time()
-    
-    async def process_interaction(self, 
-                                  interaction: Interaction, 
-                                  memory: Memory) -> EmotionalState:
-        """Actualiza emoción basado en nueva interacción y contexto"""
-        
-        # Aplicar decaimiento primero (paso del tiempo)
-        self._apply_time_decay()
-        
-        # 1. Impacto del sentimiento del mensaje actual
-        sentiment_impact = interaction.sentiment * 15  # escalado
-        
-        # 2. Factor histórico con este usuario
-        avg_user_sentiment = memory.get_average_sentiment_for(interaction.user_id)
-        history_impact = avg_user_sentiment * 10
-        
-        # 3. Contexto global reciente (cómo trata la comunidad)
-        global_sentiment = memory.get_recent_global_sentiment()
-        global_impact = global_sentiment * 5
-        
-        # Calcular cambio total
-        total_impact = sentiment_impact + history_impact + global_impact
-        
-        # Actualizar energía y confianza
-        self.state.energy += total_impact * 0.3
-        self.state.trust += total_impact * 0.2
-        
-        # Limitar rangos
-        self.state.energy = max(0, min(100, self.state.energy))
-        self.state.trust = max(0, min(100, self.state.trust))
-        
-        # Determinar nueva emoción primaria
-        self._update_primary_emotion()
-        
-        # Registrar timestamp
-        self.state.last_updated = interaction.timestamp.timestamp()
+
+    # ==========================================================
+    # MÉTODO GLOBAL
+    # ==========================================================
+
+    async def process_interaction(
+        self,
+        interaction: Interaction,
+        memory: Memory
+    ) -> EmotionalState:
+        updated = await self.process_interaction_for_state(
+            state=self.state,
+            interaction=interaction,
+            memory=memory
+        )
+        self.state = updated
         self.last_update_time = time.time()
-        
-        logger.info(f"Emoción actualizada: {self.state.primary_emotion.value} (energía={self.state.energy:.1f}, confianza={self.state.trust:.1f})")
-        return self.state
-    
-    def _update_primary_emotion(self):
-        """Lógica de transición de emociones"""
-        e = self.state.energy
-        t = self.state.trust
-        
-        if e < 20:
-            self.state.primary_emotion = Emotion.SAD
-        elif e > 80 and t > 70:
-            self.state.primary_emotion = Emotion.HAPPY
-        elif t < 30:
-            self.state.primary_emotion = Emotion.ANGRY
-        elif e < 40 and t < 40:
-            self.state.primary_emotion = Emotion.FEARFUL
+        logger.info(
+            f"Emoción actualizada: {updated.primary_emotion.value} "
+            f"(energía={updated.energy:.1f}, confianza={updated.trust:.1f})"
+        )
+        return updated
+
+    # ==========================================================
+    # MÉTODO POR ESTADO EXTERNO
+    # ==========================================================
+
+    async def process_interaction_for_state(
+        self,
+        state: EmotionalState,
+        interaction: Interaction,
+        memory: Memory,
+        repair_multiplier: float = 1.0,
+        relationship_damage: float = 0.0,
+        aggression_impact: dict = None,
+    ) -> EmotionalState:
+
+        self._apply_time_decay_to_state(state, interaction.timestamp.timestamp())
+
+        if aggression_impact:
+            # Agresión: impacto directo sin tapear (los golpes deben sentirse)
+            state.energy = self._clamp(state.energy + aggression_impact.get("energy", 0))
+            state.trust  = self._clamp(state.trust  + aggression_impact.get("trust",  0))
+
         else:
-            self.state.primary_emotion = Emotion.NEUTRAL
-    
-    def _apply_time_decay(self):
-        """Aplica decaimiento natural según tiempo transcurrido"""
-        now = time.time()
-        hours_passed = (now - self.last_update_time) / 3600  # horas
+            # Flujo normal — calcular delta y tapearlo
+            sentiment_impact = interaction.sentiment * 15
+            history_impact   = memory.get_average_sentiment_for(interaction.user_id) * 10
+            global_impact    = memory.get_recent_global_sentiment() * 5
+            total_impact     = sentiment_impact + history_impact + global_impact
+
+            if interaction.sentiment >= 0 and repair_multiplier > 1.0:
+                total_impact += settings.REPAIR_ENERGY_BOOST * repair_multiplier
+                trust_repair  = settings.REPAIR_TRUST_BOOST * repair_multiplier
+                state.trust  = self._clamp(
+                    state.trust + self._cap_delta(trust_repair)
+                )
+
+            energy_delta = total_impact * 0.3
+            trust_delta  = total_impact * 0.2
+
+            state.energy = self._clamp(state.energy + self._cap_delta(energy_delta))
+            state.trust  = self._clamp(state.trust  + self._cap_delta(trust_delta))
+
+        self._update_primary_emotion(state)
+        state.last_updated = interaction.timestamp.timestamp()
+        return state
+
+    # ==========================================================
+    # LÓGICA INTERNA
+    # ==========================================================
+
+    def _cap_delta(self, delta: float) -> float:
+        """Limita el cambio máximo por mensaje para subidas/bajadas graduales."""
+        return max(-MAX_DELTA_PER_MESSAGE, min(MAX_DELTA_PER_MESSAGE, delta))
+
+    def _apply_time_decay_to_state(self, state: EmotionalState, reference_time: float):
+        if not state.last_updated:
+            return
+        hours_passed = (reference_time - state.last_updated) / 3600
         if hours_passed <= 0:
             return
-        
-        # Decaimiento exponencial
         decay_factor = self.mood_decay ** hours_passed
-        self.state.energy *= decay_factor
-        self.state.trust *= decay_factor
-        
-        # Asegurar rangos
-        self.state.energy = max(0, min(100, self.state.energy))
-        self.state.trust = max(0, min(100, self.state.trust))
-        self.last_update_time = now
+        state.energy = self._clamp(state.energy * decay_factor)
+        state.trust  = self._clamp(state.trust  * decay_factor)
+
+    def _update_primary_emotion(self, state: EmotionalState):
+        """
+        FIX v0.6.3: Umbrales más realistas.
+
+        Zonas:
+          happy   → e > 65 AND t > 60   (alcanzable con conversación positiva)
+          sad     → e < 25              (energía muy baja)
+          angry   → t < 25              (confianza muy baja)
+          fearful → e < 40 AND t < 40   (ambas bajas)
+          neutral → todo lo demás
+        """
+        e = state.energy
+        t = state.trust
+
+        if e > 65 and t > 60:
+            state.primary_emotion = Emotion.HAPPY
+        elif e < 25:
+            state.primary_emotion = Emotion.SAD
+        elif t < 25:
+            state.primary_emotion = Emotion.ANGRY
+        elif e < 40 and t < 40:
+            state.primary_emotion = Emotion.FEARFUL
+        else:
+            state.primary_emotion = Emotion.NEUTRAL
+
+    def _clamp(self, value: float) -> float:
+        return max(0.0, min(100.0, value))
