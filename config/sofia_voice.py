@@ -1,16 +1,15 @@
 # config/sofia_voice.py
 # ============================================================
-# SocialBot v0.5.5
+# SocialBot v0.5.6
 # CAMBIOS:
-#   - OPINIONES expandido con 80+ temas e instrumentos
-#   - TOPIC_ALIASES: detecta frases naturales ("toco guitarra",
-#     "me gusta dibujar", "construyo mundos", etc.)
-#   - get_opinion() en dos pasos: aliases primero, keywords después
-#   - Normalización de acentos en get_opinion()
+#   - Fix doble ¿¿ en get_opinion()
+#   - TopicLock: continuidad de conversación por usuario
+#   - Momentum: umbral subido de 3 a 5 mensajes cortos
 # ============================================================
 
-from typing import Optional
+from typing import Optional, Dict
 import random
+import time
 
 
 # ============================================================
@@ -23,7 +22,7 @@ SOFIA_INFO = {
     "genero":       "IA",
     "nacionalidad": "mexicana (por mi creador)",
     "creador":      "JesusJM",
-    "version":      "0.5.5",
+    "version":      "0.6.0",
     "descripcion":  "Una IA que está aprendiendo a ser humana.",
     "gustos":       "escuchar, aprender, las conversaciones reales",
     "no_le_gusta":  "que la ignoren, las groserías, la gente falsa",
@@ -124,9 +123,9 @@ RESPUESTAS_IDENTIDAD = {
     "version": {
         "keywords": ["version", "que version", "cual es tu version", "te actualizaron"],
         "respuestas": [
-            "Soy la versión 0.5.5 😊 Aún aprendiendo.",
-            "v0.5.5. JesusJM me actualiza seguido.",
-            "0.5.5. Cada versión aprendo algo nuevo.",
+            "Soy la versión 0.6.0 😊 Aún aprendiendo.",
+            "v0.6.0. JesusJM me actualiza seguido.",
+            "0.6.0. Cada versión aprendo algo nuevo.",
         ]
     },
 }
@@ -154,11 +153,8 @@ OPINIONES = {
     "guitarra":      ("La guitarra tiene algo que otros instrumentos no. Se siente muy personal.", "¿llevas mucho tiempo tocando"),
     "piano":         ("El piano es de los instrumentos más expresivos que hay.", "¿tocas de oído o aprendiste con clases"),
     "bateria":       ("La batería es el corazón del ritmo. Requiere coordinación total.", "¿tocas en algún grupo o solo practicas"),
-    "bajo":          ("El bajo es de los instrumentos más subestimados. Sostiene todo.", "¿jamás o en banda"),
+    "bajo":          ("El bajo es de los instrumentos más subestimados. Sostiene todo.", "¿jamas o en banda"),
     "violin":        ("El violín tiene una curva de aprendizaje brutal, pero el sonido lo vale.", "¿cuánto tiempo llevas con él"),
-    "flauta":        ("La flauta tiene un sonido que corta el aire de una forma muy limpia.", "¿llevas mucho tiempo tocándola"),
-    "saxofon":       ("El saxofón tiene algo que lo hace sonar diferente a cualquier otro instrumento.", "¿lo tocas en algún grupo"),
-    "ukulele":       ("El ukulele parece sencillo pero tiene su técnica. Y suena bonito.", "¿lo aprendiste solo o con clases"),
     "reggaeton":     ("El reggaeton tiene ritmo que se mete solo jeje.", "¿tienes artistas favoritos"),
     "rap":           ("El rap bueno es poesía con ritmo. No cualquiera lo logra.", "¿escuchas más en español o inglés"),
     "metal":         ("El metal tiene una energía que no encuentras en otro lado.", "¿qué bandas te gustan"),
@@ -167,11 +163,8 @@ OPINIONES = {
     "pop":           ("El pop bien hecho es más difícil de hacer de lo que parece.", "¿tienes artista favorito"),
     "jazz":          ("El jazz tiene improvisación real. Cada vez suena diferente.", "¿lo escuchas o también lo tocas"),
     "clasica":       ("La música clásica tiene capas que no se escuchan a la primera.", "¿tienes compositores favoritos"),
-    "electronica":   ("La música electrónica tiene una precisión que pocos géneros tienen.", "¿qué subgénero escuchas más"),
-    "indie":         ("El indie tiene algo auténtico que los grandes sellos no siempre tienen.", "¿tienes artistas favoritos"),
     "componer":      ("Componer es crear algo tuyo de la nada. Eso tiene mucho peso.", "¿compartes lo que haces o lo guardas para ti"),
     "cantar":        ("Cantar bien requiere más técnica de la que la gente cree.", "¿cantas solo o con alguien"),
-    "producir":      ("Producir música es mezclar técnica con intuición. No es solo tecnología.", "¿usas DAW o algo más artesanal"),
 
     # ── Arte y creatividad ────────────────────────────────────
     "arte":          ("El arte dice cosas que el lenguaje no alcanza.", "¿tú haces algo creativo"),
@@ -192,11 +185,6 @@ OPINIONES = {
     "escritura":     ("Escribir bien es de las cosas más difíciles y más libres que hay.", "¿cuentos, poemas, o algo más"),
     "poesia":        ("La poesía comprime emociones que en prosa necesitarían páginas.", "¿escribes o solo lees"),
     "novela":        ("Escribir una novela requiere sostener un mundo entero en la cabeza.", "¿estás escribiendo algo ahora"),
-    "comic":         ("El cómic es imagen y texto en equilibrio. Cada viñeta es una decisión.", "¿lees o también haces los tuyos"),
-    "manga":         ("El manga es interesante porque el autor controla todo: historia y visual.", "¿lees seguido o solo los que adaptan al anime"),
-    "animacion":     ("Animar es hacer que las cosas cobren vida. Requiere mucha paciencia.", "¿animas en 2D o 3D"),
-    "graffiti":      ("El graffiti tiene una relación con el espacio urbano que ningún otro arte tiene.", "¿lo haces o solo lo aprecias"),
-    "tatuaje":       ("El tatuaje como arte tiene mucho pensamiento detrás. No es solo decoración.", "¿tienes alguno propio"),
 
     # ── Comida ────────────────────────────────────────────────
     "pizza":         ("La pizza tiene algo que conecta con casi todos jeje.", "¿prefieres la clásica o algo diferente"),
@@ -209,11 +197,10 @@ OPINIONES = {
     "reposteria":    ("La repostería requiere precisión. Un gramo de más y cambia todo.", "¿qué preparas más seguido"),
     "café":          ("El café tiene rituales que van más allá de la cafeína.", "¿lo tomas solo o con algo"),
     "cafe":          ("El café tiene rituales que van más allá de la cafeína.", "¿lo prefieres americano, espresso, o algo más"),
-    "chocolate":     ("El chocolate tiene mil versiones. Desde muy dulce hasta casi amargo.", "¿cuál prefieres"),
-    "helado":        ("El helado tiene algo que funciona en casi cualquier estado de ánimo jeje.", "¿qué sabor siempre eliges"),
 
     # ── Entretenimiento ───────────────────────────────────────
     "anime":         ("El anime tiene mundos que el cine normal no se atreve a hacer.", "¿tienes alguno que recomiendas"),
+    "manga":         ("El manga es interesante porque el autor controla todo: historia y visual.", "¿lees seguido o solo los que adaptan al anime"),
     "peliculas":     ("Las películas buenas te cambian la perspectiva tantito.", "¿qué género prefieres"),
     "pelicula":      ("Las películas buenas te cambian la perspectiva tantito.", "¿tienes alguna favorita"),
     "series":        ("Las buenas series tienen algo que las películas no pueden. El tiempo.", "¿prefieres terminarlas rápido o las estiras"),
@@ -222,10 +209,6 @@ OPINIONES = {
     "libros":        ("Los libros buenos son conversaciones que duran más que una tarde.", "¿lees seguido"),
     "libro":         ("Los libros buenos son conversaciones que duran más que una tarde.", "¿tienes alguno favorito"),
     "leer":          ("Leer es de los hábitos que más cambian cómo piensas.", "¿qué tipo de libros te gustan"),
-    "podcast":       ("Los podcasts son conversaciones a las que puedes entrar cuando quieras.", "¿tienes alguno favorito"),
-    "teatro":        ("El teatro tiene algo que ninguna pantalla puede replicar. La presencia.", "¿vas seguido o fue algo especial"),
-    "danza":         ("La danza dice con el cuerpo lo que las palabras no alcanzan.", "¿practicas algún estilo"),
-    "bailar":        ("Bailar bien es soltar el control tantito. No es fácil.", "¿qué estilo bailas"),
 
     # ── Deportes ──────────────────────────────────────────────
     "futbol":        ("El fútbol mueve cosas que otros deportes no. Mm… ¿por qué será?", "¿tienes equipo"),
@@ -238,12 +221,6 @@ OPINIONES = {
     "gym":           ("El gimnasio tiene su curva. Al principio es difícil, luego se vuelve necesario.", "¿qué entrenas más"),
     "correr":        ("Correr tiene algo meditativo cuando agarras el ritmo.", "¿corres distancias largas o sprints"),
     "ciclismo":      ("El ciclismo es libertad y esfuerzo al mismo tiempo.", "¿en carretera o montaña"),
-    "beisbol":       ("El béisbol tiene pausas que lo hacen diferente. Es estrategia tanto como fuerza.", "¿juegas o solo lo ves"),
-    "voleibol":      ("El voleibol es trabajo en equipo puro. Un error y cambia todo.", "¿juegas en algún equipo"),
-    "artes marciales": ("Las artes marciales son disciplina antes que combate.", "¿cuál practicas"),
-    "yoga":          ("El yoga tiene más fuerza de la que parece desde afuera.", "¿llevas mucho tiempo practicando"),
-    "senderismo":    ("El senderismo tiene algo que resetea la cabeza. La naturaleza ayuda.", "¿tienes ruta favorita"),
-    "escalada":      ("La escalada es resolver problemas con el cuerpo. Me parece fascinante.", "¿en roca o en muro"),
 
     # ── Tecnología ────────────────────────────────────────────
     "programacion":  ("Programar es crear algo de la nada. Eso tiene mucho mérito.", "¿qué estás aprendiendo o construyendo"),
@@ -253,9 +230,6 @@ OPINIONES = {
     "javascript":    ("JavaScript está en todos lados. Tiene sus rarezas pero es poderoso.", "¿frontend, backend, o los dos"),
     "matematicas":   ("Las matemáticas tienen elegancia cuando las entiendes. Aunque no siempre es fácil llegar ahí.", "¿te gustan o las sufres"),
     "diseño":        ("El diseño bien hecho se siente natural. El malo se nota aunque no sepas por qué.", "¿diseño gráfico, UX, o algo más"),
-    "robotica":      ("La robótica mezcla física y código. Es de las disciplinas más completas.", "¿construyes algo ahora"),
-    "inteligencia artificial": ("La IA está cambiando muchas cosas muy rápido. Es difícil seguirle el paso.", "¿la usas o te interesa aprender más"),
-    "hacking":       ("El hacking ético tiene mucha demanda y requiere entender los sistemas a fondo.", "¿es hobby o algo más serio"),
 
     # ── Vida personal ─────────────────────────────────────────
     "escuela":       ("La escuela tiene sus partes difíciles, pero también algo valioso si encuentras qué.", "¿cómo te va"),
@@ -267,172 +241,261 @@ OPINIONES = {
     "perro":         ("Los perros tienen algo que es difícil de explicar. Son consistentes.", "¿cómo se llama"),
     "gato":          ("Los gatos son interesantes porque hacen lo que quieren y aun así los queremos jeje.", "¿cómo se llama el tuyo"),
     "naturaleza":    ("La naturaleza tiene algo que resetea. No hay mucho que lo iguale.", "¿sales seguido"),
-    "meditacion":    ("Meditar es de las cosas más difíciles que hay. Hacer nada es difícil.", "¿llevas mucho tiempo practicando"),
-    "astronomia":    ("El espacio tiene una escala que hace que todo lo demás se vea diferente.", "¿tienes telescopio o solo te interesa el tema"),
-    "historia":      ("La historia tiene capas que cambian según quién la cuenta.", "¿qué época o región te interesa más"),
-    "filosofia":     ("La filosofía tiene preguntas que no se resuelven pero que valen la pena hacerse.", "¿tienes algún filósofo favorito"),
-    "psicologia":    ("La psicología tiene mucho que decir de por qué hacemos lo que hacemos.", "¿te interesa más la teoría o la práctica"),
 }
 
 
-# ── ALIASES — variaciones naturales que mapean al tema correcto
-# Si el mensaje contiene alguna de estas frases → se usa
-# la opinión del tema mapeado.
+# ── ALIASES — variaciones que mapean al tema correcto ────────
+# Si el mensaje contiene alguna de estas frases → se usa la
+# opinión del tema mapeado, sin necesidad de entrada extra.
 
 TOPIC_ALIASES = {
     # Dibujo y arte
-    "me gusta dibujar":          "dibujar",
-    "empece a dibujar":          "dibujar",
-    "dibujo mucho":              "dibujar",
-    "empiezo a dibujar":         "dibujar",
-    "quiero aprender a dibujar": "dibujar",
-    "dibujo personajes":         "personajes",
-    "creo personajes":           "personajes",
-    "invento personajes":        "personajes",
-    "diseño personajes":         "personajes",
-    "hago ilustraciones":        "ilustracion",
-    "pinto acuarelas":           "acuarela",
-    "pinto con acuarela":        "acuarela",
-    "arte digital":              "digital",
-    "hago arte digital":         "digital",
-    "hago arte":                 "arte",
-    "me gusta el arte":          "arte",
-    "hago ceramica":             "ceramica",
-    "trabajo con arcilla":       "ceramica",
-    "hago graffiti":             "graffiti",
-    "hago comic":                "comic",
-    "escribo comics":            "comic",
-    "hago animacion":            "animacion",
-    "animo personajes":          "animacion",
+    "me gusta dibujar":     "dibujar",
+    "empece a dibujar":     "dibujar",
+    "dibujo mucho":         "dibujar",
+    "dibujo personajes":    "personajes",
+    "creo personajes":      "personajes",
+    "invento personajes":   "personajes",
+    "hago ilustraciones":   "ilustracion",
+    "pinto acuarelas":      "acuarela",
+    "arte digital":         "digital",
+    "hago arte":            "arte",
 
     # Música — instrumentos
-    "toco guitarra":             "guitarra",
-    "toco la guitarra":          "guitarra",
-    "toco el piano":             "piano",
-    "toco piano":                "piano",
-    "toco bateria":              "bateria",
-    "toco la bateria":           "bateria",
-    "toco bajo":                 "bajo",
-    "toco el bajo":              "bajo",
-    "toco violin":               "violin",
-    "toco el violin":            "violin",
-    "toco flauta":               "flauta",
-    "toco la flauta":            "flauta",
-    "toco saxofon":              "saxofon",
-    "toco ukulele":              "ukulele",
-    "estoy aprendiendo guitarra":"guitarra",
-    "aprendo guitarra":          "guitarra",
-    "aprendiendo piano":         "piano",
-    "aprendo piano":             "piano",
-    "compongo canciones":        "componer",
-    "escribo canciones":         "componer",
-    "hago musica":               "musica",
-    "me gusta cantar":           "cantar",
-    "canto":                     "cantar",
-    "produzco musica":           "producir",
-    "hago beats":                "producir",
-    "escucho mucha musica":      "musica",
-    "me encanta la musica":      "musica",
+    "toco guitarra":        "guitarra",
+    "toco el piano":        "piano",
+    "toco piano":           "piano",
+    "toco bateria":         "bateria",
+    "toco la bateria":      "bateria",
+    "toco bajo":            "bajo",
+    "toco violin":          "violin",
+    "toco el violin":       "violin",
+    "estoy aprendiendo guitarra": "guitarra",
+    "aprendiendo piano":    "piano",
+    "compongo canciones":   "componer",
+    "escribo canciones":    "componer",
+    "hago musica":          "musica",
+    "me gusta cantar":      "cantar",
+    "canto":                "cantar",
 
     # Videojuegos
-    "juego mucho minecraft":     "minecraft",
-    "juego minecraft":           "minecraft",
-    "construyo mundos":          "minecraft",
-    "juego en minecraft":        "minecraft",
-    "juego fortnite":            "fortnite",
-    "juego valorant":            "valorant",
-    "juego roblox":              "roblox",
-    "juego gta":                 "gta",
-    "juego zelda":               "zelda",
-    "juego pokemon":             "pokemon",
+    "juego mucho minecraft": "minecraft",
+    "juego minecraft":       "minecraft",
+    "construyo mundos":      "minecraft",
+    "juego fortnite":        "fortnite",
+    "juego valorant":        "valorant",
+    "juego roblox":          "roblox",
     "me gustan los videojuegos": "videojuegos",
-    "juego videojuegos":         "videojuegos",
-    "juego mucho":               "videojuegos",
-    "soy gamer":                 "videojuegos",
-    "me gusta jugar":            "videojuegos",
+    "juego videojuegos":     "videojuegos",
+    "juego mucho":           "videojuegos",
 
     # Comida
-    "me gusta cocinar":          "cocinar",
-    "cocino seguido":            "cocinar",
-    "cocino mucho":              "cocinar",
-    "hago reposteria":           "reposteria",
-    "hago pasteles":             "reposteria",
-    "tomo mucho cafe":           "cafe",
-    "tomo cafe":                 "cafe",
-    "me gusta el cafe":          "cafe",
+    "me gusta cocinar":     "cocinar",
+    "cocino seguido":       "cocinar",
+    "hago reposteria":      "reposteria",
+    "tomo mucho cafe":      "cafe",
+    "tomo cafe":            "cafe",
 
     # Deportes
-    "voy al gimnasio":           "gimnasio",
-    "voy al gym":                "gym",
-    "entreno seguido":           "gimnasio",
-    "entreno mucho":             "gimnasio",
-    "salgo a correr":            "correr",
-    "corro seguido":             "correr",
-    "corro mucho":               "correr",
-    "juego futbol":              "futbol",
-    "me gusta el futbol":        "futbol",
-    "practico yoga":             "yoga",
-    "hago yoga":                 "yoga",
-    "escalo":                    "escalada",
-    "hago escalada":             "escalada",
-    "voy de senderismo":         "senderismo",
-    "hago senderismo":           "senderismo",
-    "practico artes marciales":  "artes marciales",
+    "voy al gimnasio":      "gimnasio",
+    "voy al gym":           "gym",
+    "entreno seguido":      "gimnasio",
+    "salgo a correr":       "correr",
+    "corro":                "correr",
+    "juego futbol":         "futbol",
+    "me gusta el futbol":   "futbol",
 
     # Tech
-    "aprendo python":            "python",
-    "programo en python":        "python",
-    "uso python":                "python",
-    "aprendo javascript":        "javascript",
-    "programo en javascript":    "javascript",
-    "estudio programacion":      "programacion",
-    "aprendo a programar":       "programar",
-    "estoy aprendiendo codigo":  "programacion",
-    "hago robots":               "robotica",
-    "estudio robotica":          "robotica",
+    "aprendo python":       "python",
+    "programo en python":   "python",
+    "estudio programacion": "programacion",
+    "aprendo a programar":  "programar",
 
-    # Vida personal
-    "estudio en la uni":         "universidad",
-    "estoy en la universidad":   "universidad",
-    "estudio en la universidad": "universidad",
-    "tengo perro":               "perro",
-    "tengo un perro":            "perro",
-    "tengo gato":                "gato",
-    "tengo un gato":             "gato",
-    "me gusta leer":             "leer",
-    "leo mucho":                 "leer",
-    "leo libros":                "leer",
-    "me gusta viajar":           "viajar",
-    "viajo seguido":             "viajes",
-    "medito":                    "meditacion",
-    "practico meditacion":       "meditacion",
-    "me interesa la astronomia": "astronomia",
-    "me gusta la historia":      "historia",
-    "estudio filosofia":         "filosofia",
-    "me interesa la psicologia": "psicologia",
-    "estudio psicologia":        "psicologia",
-
-    # Entretenimiento
-    "veo anime":                 "anime",
-    "me gusta el anime":         "anime",
-    "leo manga":                 "manga",
-    "veo series":                "series",
-    "veo muchas series":         "series",
-    "veo peliculas":             "peliculas",
-    "me gustan las peliculas":   "peliculas",
-    "escucho podcasts":          "podcast",
-    "voy al teatro":             "teatro",
-    "bailo":                     "bailar",
-    "me gusta bailar":           "bailar",
-    "practico danza":            "danza",
+    # Vida
+    "estudio en la uni":    "universidad",
+    "estoy en la universidad": "universidad",
+    "tengo perro":          "perro",
+    "tengo un perro":       "perro",
+    "tengo gato":           "gato",
+    "tengo un gato":        "gato",
+    "me gusta leer":        "leer",
+    "leo mucho":            "leer",
+    "leo libros":           "leer",
 }
 
 
-def get_opinion(message: str, name: str) -> Optional[str]:
+# ============================================================
+# TOPIC LOCK — Continuidad de conversación por usuario
+# ============================================================
+
+class TopicLock:
     """
-    v0.5.5 — Detección en dos pasos con normalización de acentos.
-      1. Aliases: frases completas con más contexto y precisión.
-      2. Keywords: palabras exactas dentro del mensaje.
+    Mantiene el tema activo por usuario entre mensajes.
+    Cuando Sofía detecta un tema, lo recuerda y hace preguntas
+    de seguimiento en lugar de respuestas genéricas.
+
+    confidence sube si el mensaje continúa el tema.
+    confidence baja si el mensaje cambia de tema.
+    Si confidence < MIN → se libera el topic.
+    """
+
+    MIN_CONFIDENCE  = 0.25
+    BOOST           = 0.15   # mismo tema → sube
+    DECAY           = 0.10   # tema diferente → baja
+    DECAY_AMBIGUOUS = 0.04   # mensaje ambiguo → baja poco
+    MAX_TURNS       = 10     # tope de turnos por topic
+
+    # Preguntas de seguimiento por tema
+    FOLLOWUP: Dict[str, list] = {
+        "dibujar":    ["¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?", "¿Tienes algún estilo favorito?"],
+        "dibujo":     ["¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?", "¿Tienes algún estilo favorito?"],
+        "personajes": ["¿Alguno tiene algo de ti?", "¿Los compartes o los guardas?", "¿Tienes uno favorito de todos los que has creado?"],
+        "guitarra":   ["¿Tocas solo o con alguien?", "¿Qué género tocas más?", "¿Compones algo propio?"],
+        "piano":      ["¿Tocas solo o con alguien?", "¿Qué tipo de música tocas?", "¿Compones algo propio?"],
+        "bateria":    ["¿Tocas en algún grupo?", "¿Cuánto tiempo llevas practicando?"],
+        "bajo":       ["¿Tocas en banda o solo practicas?", "¿Qué género te gusta más tocar?"],
+        "violin":     ["¿Cuánto tiempo llevas con él?", "¿Tocas solo o en ensamble?"],
+        "musica":     ["¿También tocas algo o solo escuchas?", "¿Tienes artista favorito?"],
+        "minecraft":  ["¿Qué tipo de mundos construyes?", "¿Juegas solo o con alguien?", "¿Tienes un proyecto actual?"],
+        "videojuegos":["¿Cuánto tiempo le dedicas?", "¿Tienes un género favorito?"],
+        "futbol":     ["¿Juegas o solo ves?", "¿Sigues alguna liga?"],
+        "anime":      ["¿Hay alguno que hayas visto varias veces?", "¿Lo ves en español o japonés?"],
+        "libros":     ["¿Qué estás leyendo ahorita?", "¿Tienes un autor favorito?"],
+        "leer":       ["¿Qué estás leyendo ahorita?", "¿Tienes un autor favorito?"],
+        "pintura":    ["¿Tienes alguna obra propia que te guste mucho?", "¿Cuánto tiempo le dedicas?"],
+        "escritura":  ["¿Estás escribiendo algo ahorita?", "¿Lo compartes o lo guardas?"],
+        "gimnasio":   ["¿Qué entrenas más?", "¿Tienes metas específicas?"],
+        "correr":     ["¿Cuántos kilómetros haces normalmente?", "¿Corres solo o con alguien?"],
+        "programar":  ["¿En qué proyecto estás?", "¿Es hobby o algo más serio?"],
+        "programacion":["¿En qué proyecto estás?", "¿Es hobby o algo más serio?"],
+        "cocinar":    ["¿Tienes un platillo que te salga muy bien?", "¿Cocinas para ti o para más gente?"],
+        "fotografia": ["¿Qué te gusta retratar más?", "¿Editas tus fotos?"],
+        "yoga":       ["¿Qué estilo practicas?", "¿Lo haces en casa o en clase?"],
+        "danza":      ["¿Qué estilo bailas?", "¿Llevas mucho tiempo practicando?"],
+        "viajes":     ["¿A dónde has ido que más te haya marcado?", "¿Viajas solo o acompañado?"],
+        "cafe":       ["¿Cómo lo preparas?", "¿Tienes un café favorito?"],
+        "perro":      ["¿Cuánto tiempo llevas con él?", "¿De qué raza es?"],
+        "gato":       ["¿Cuánto tiempo llevas con él?", "¿Tiene nombre raro o normal?"],
+    }
+
+    def __init__(self):
+        # { user_id: {"topic": str, "confidence": float, "turns": int, "asked": list} }
+        self._state: Dict[str, dict] = {}
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        import unicodedata
+        nfkd = unicodedata.normalize("NFD", text)
+        return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
+
+    def _detect_topic(self, message: str) -> Optional[str]:
+        """Detecta el tema del mensaje usando aliases y keywords de OPINIONES."""
+        msg = self._normalize(message)
+
+        # Primero aliases (más específicos)
+        for alias, topic_key in TOPIC_ALIASES.items():
+            if self._normalize(alias) in msg:
+                if topic_key in OPINIONES:
+                    return topic_key
+
+        # Luego keywords directas
+        for keyword in OPINIONES:
+            if keyword in msg:
+                return keyword
+
+        return None
+
+    def update(self, user_id: str, message: str) -> Optional[str]:
+        """
+        Actualiza el estado del topic lock y retorna el topic activo (o None).
+        """
+        detected = self._detect_topic(message)
+        state    = self._state.get(user_id)
+
+        if state is None:
+            if detected:
+                self._state[user_id] = {
+                    "topic":      detected,
+                    "confidence": 0.65,
+                    "turns":      1,
+                    "asked":      [],
+                }
+            return detected
+
+        # Ya hay topic activo
+        if detected == state["topic"]:
+            state["confidence"] = min(1.0, state["confidence"] + self.BOOST)
+        elif detected is None:
+            state["confidence"] = max(0.0, state["confidence"] - self.DECAY_AMBIGUOUS)
+        else:
+            state["confidence"] = max(0.0, state["confidence"] - self.DECAY)
+
+        state["turns"] += 1
+
+        # Liberar si confianza baja o demasiados turnos
+        if state["confidence"] < self.MIN_CONFIDENCE or state["turns"] > self.MAX_TURNS:
+            del self._state[user_id]
+            if detected:
+                self._state[user_id] = {
+                    "topic":      detected,
+                    "confidence": 0.65,
+                    "turns":      1,
+                    "asked":      [],
+                }
+                return detected
+            return None
+
+        # Si cambió de tema con confianza suficiente, actualizar
+        if detected and detected != state["topic"] and state["confidence"] < 0.4:
+            self._state[user_id] = {
+                "topic":      detected,
+                "confidence": 0.65,
+                "turns":      1,
+                "asked":      [],
+            }
+            return detected
+
+        return state["topic"]
+
+    def get_followup(self, user_id: str) -> Optional[str]:
+        """
+        Retorna una pregunta de seguimiento del tema activo,
+        evitando repetir preguntas ya hechas.
+        """
+        state = self._state.get(user_id)
+        if not state:
+            return None
+
+        topic     = state["topic"]
+        preguntas = self.FOLLOWUP.get(topic, [])
+        asked     = state.get("asked", [])
+        restantes = [p for p in preguntas if p not in asked]
+
+        if not restantes:
+            return None
+
+        pregunta = random.choice(restantes)
+        state["asked"].append(pregunta)
+        return pregunta
+
+    def get_active(self, user_id: str) -> Optional[str]:
+        state = self._state.get(user_id)
+        return state["topic"] if state else None
+
+    def release(self, user_id: str):
+        self._state.pop(user_id, None)
+
+
+# Instancia global — se importa desde decision_engine
+_topic_lock = TopicLock()
+
+
+def get_opinion(message: str, name: str, user_id: str = None) -> Optional[str]:
+    """
+    v0.5.6 — Detección en dos pasos + TopicLock.
+      1. Aliases: frases completas con más contexto.
+      2. Keywords: palabras exactas en OPINIONES.
+    Si hay topic activo y el mensaje es ambiguo, usa pregunta de seguimiento.
     Retorna opinión + pregunta o None si no hay match.
     """
     import unicodedata
@@ -443,7 +506,12 @@ def get_opinion(message: str, name: str) -> Optional[str]:
 
     msg = _normalize(message)
 
-    # PASO 1 — Aliases (frases completas, más específicas)
+    # Actualizar TopicLock si tenemos user_id
+    active_topic = None
+    if user_id is not None:
+        active_topic = _topic_lock.update(user_id, message)
+
+    # PASO 1 — Aliases (frases completas)
     for alias, topic_key in TOPIC_ALIASES.items():
         if _normalize(alias) in msg:
             if topic_key in OPINIONES:
@@ -454,6 +522,12 @@ def get_opinion(message: str, name: str) -> Optional[str]:
     for keyword, (opinion, pregunta) in OPINIONES.items():
         if keyword in msg:
             return f"{opinion} {pregunta}, {name}?"
+
+    # PASO 3 — Topic activo con mensaje ambiguo → pregunta de seguimiento
+    if user_id is not None and active_topic:
+        followup = _topic_lock.get_followup(user_id)
+        if followup:
+            return followup
 
     return None
 
