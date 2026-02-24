@@ -1,15 +1,17 @@
 # config/sofia_voice.py
 # ============================================================
-# SocialBot v0.5.6
+# SocialBot v0.5.7
 # CAMBIOS:
 #   - Fix doble ¿¿ en get_opinion()
-#   - TopicLock: continuidad de conversación por usuario
-#   - Momentum: umbral subido de 3 a 5 mensajes cortos
+#   - TopicLock: continuidad + detección de cambio rápido de tema
+#   - Frases naturales cuando el usuario salta de tema ("oye cambias rápido jeje")
+#   - Momentum: umbral subido de 3 → 5 en settings.py
+#   - get_opinion() acepta user_id para activar TopicLock
 # ============================================================
 
 from typing import Optional, Dict
 import random
-import time
+
 
 
 # ============================================================
@@ -325,57 +327,138 @@ TOPIC_ALIASES = {
 
 
 # ============================================================
-# TOPIC LOCK — Continuidad de conversación por usuario
+# TOPIC LOCK — Continuidad + detección de cambio de tema
 # ============================================================
 
 class TopicLock:
     """
-    Mantiene el tema activo por usuario entre mensajes.
-    Cuando Sofía detecta un tema, lo recuerda y hace preguntas
-    de seguimiento en lugar de respuestas genéricas.
-
-    confidence sube si el mensaje continúa el tema.
-    confidence baja si el mensaje cambia de tema.
-    Si confidence < MIN → se libera el topic.
+    Mantiene el tema activo por usuario.
+    - Cuando el usuario continúa el tema → pregunta de seguimiento.
+    - Cuando cambia de tema rápido → comentario natural + nueva opinión.
+    - Cuando el mensaje es ambiguo → pregunta de seguimiento del tema activo.
     """
 
     MIN_CONFIDENCE  = 0.25
-    BOOST           = 0.15   # mismo tema → sube
-    DECAY           = 0.10   # tema diferente → baja
-    DECAY_AMBIGUOUS = 0.04   # mensaje ambiguo → baja poco
-    MAX_TURNS       = 10     # tope de turnos por topic
+    BOOST           = 0.15
+    DECAY_AMBIGUOUS = 0.04
+    MAX_TURNS       = 10
+
+    # Frases para cuando cambia de tema rápido
+    TOPIC_CHANGE_COMMENTS = [
+        "Oye, cambias rápido de tema jeje. Sale, te sigo.",
+        "Mm… de {anterior} a {nuevo} en un mensaje jeje. ¿Qué onda?",
+        "Jeje ¿y lo del {anterior}? Bueno, cuéntame lo del {nuevo}.",
+        "Oye, salto rápido ese jeje. Primero {anterior}, ahora {nuevo}.",
+        "Eres de muchos intereses jeje. De {anterior} a {nuevo} así de rápido.",
+        "Mm… cambio de tema detectado jeje. Sale, cuéntame lo del {nuevo}.",
+    ]
+
+    TOPIC_NAMES: Dict[str, str] = {
+        "dibujar": "dibujar", "dibujo": "el dibujo",
+        "personajes": "los personajes", "pintura": "la pintura",
+        "guitarra": "la guitarra", "piano": "el piano",
+        "bateria": "la batería", "bajo": "el bajo",
+        "violin": "el violín", "musica": "la música",
+        "minecraft": "Minecraft", "videojuegos": "los videojuegos",
+        "fortnite": "Fortnite", "valorant": "Valorant",
+        "futbol": "el fútbol", "deportes": "los deportes",
+        "gimnasio": "el gimnasio", "correr": "correr",
+        "anime": "el anime", "libros": "los libros",
+        "leer": "leer", "peliculas": "las películas",
+        "programar": "programar", "programacion": "programar",
+        "cocinar": "cocinar", "fotografia": "la fotografía",
+        "escritura": "escribir", "escribir": "escribir",
+        "yoga": "yoga", "danza": "la danza",
+        "arte": "el arte", "cafe": "el café",
+        "perro": "tu perro", "gato": "tu gato",
+        "viajes": "los viajes", "viajar": "viajar",
+        "series": "las series", "netflix": "las series",
+        "manga": "el manga", "poesia": "la poesía",
+        "boceto": "los bocetos", "acuarela": "la acuarela",
+        "ilustracion": "la ilustración", "digital": "arte digital",
+        "fotografia": "la fotografía", "foto": "fotos",
+        "ceramica": "cerámica", "escultura": "escultura",
+        "rock": "rock", "pop": "pop", "rap": "rap",
+        "metal": "metal", "kpop": "kpop", "jazz": "jazz",
+        "reggaeton": "reggaeton", "indie": "indie",
+        "componer": "componer", "cantar": "cantar",
+        "basquetbol": "el básquetbol", "tenis": "el tenis",
+        "natacion": "natación", "ciclismo": "el ciclismo",
+        "escalada": "la escalada", "senderismo": "el senderismo",
+        "python": "Python", "javascript": "JavaScript",
+        "codigo": "el código", "diseño": "el diseño",
+        "pizza": "la pizza", "tacos": "los tacos",
+        "sushi": "el sushi", "ramen": "el ramen",
+        "libro": "libros", "serie": "las series",
+        "pelicula": "las películas", "podcast": "podcasts",
+        "teatro": "el teatro", "bailar": "bailar",
+    }
+
+    # Grupos de temas relacionados — cambio dentro del mismo grupo NO dispara comentario
+    TOPIC_GROUPS = {
+        "arte":       {"dibujar", "dibujo", "pintura", "pintar", "ilustracion", "personajes",
+                       "boceto", "acuarela", "digital", "escultura", "ceramica", "fotografia",
+                       "foto", "graffiti", "animacion", "comic", "tatuaje", "arte"},
+        "musica":     {"musica", "guitarra", "piano", "bateria", "bajo", "violin", "flauta",
+                       "saxofon", "ukulele", "reggaeton", "rap", "metal", "kpop", "rock",
+                       "pop", "jazz", "clasica", "electronica", "indie", "componer", "cantar", "producir"},
+        "juegos":     {"minecraft", "fortnite", "roblox", "valorant", "gta", "zelda",
+                       "pokemon", "hollow knight", "celeste", "videojuegos"},
+        "lectura":    {"libros", "libro", "leer", "manga", "poesia", "novela", "escritura", "escribir"},
+        "deportes":   {"futbol", "basquetbol", "basketball", "tenis", "natacion", "gimnasio",
+                       "gym", "correr", "ciclismo", "beisbol", "voleibol", "artes marciales",
+                       "yoga", "senderismo", "escalada", "deportes"},
+        "entretenimiento": {"anime", "peliculas", "pelicula", "series", "serie", "netflix",
+                            "teatro", "danza", "bailar", "podcast"},
+        "tech":       {"programacion", "programar", "codigo", "python", "javascript",
+                       "matematicas", "diseño", "robotica", "inteligencia artificial", "hacking"},
+        "comida":     {"pizza", "tacos", "sushi", "hamburguesa", "ramen", "cocinar",
+                       "cocina", "reposteria", "café", "cafe", "chocolate", "helado"},
+    }
+
+    def _same_group(self, topic_a: str, topic_b: str) -> bool:
+        """Retorna True si los dos temas son del mismo grupo."""
+        for group in self.TOPIC_GROUPS.values():
+            if topic_a in group and topic_b in group:
+                return True
+        return False
 
     # Preguntas de seguimiento por tema
     FOLLOWUP: Dict[str, list] = {
-        "dibujar":    ["¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?", "¿Tienes algún estilo favorito?"],
-        "dibujo":     ["¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?", "¿Tienes algún estilo favorito?"],
-        "personajes": ["¿Alguno tiene algo de ti?", "¿Los compartes o los guardas?", "¿Tienes uno favorito de todos los que has creado?"],
-        "guitarra":   ["¿Tocas solo o con alguien?", "¿Qué género tocas más?", "¿Compones algo propio?"],
-        "piano":      ["¿Tocas solo o con alguien?", "¿Qué tipo de música tocas?", "¿Compones algo propio?"],
-        "bateria":    ["¿Tocas en algún grupo?", "¿Cuánto tiempo llevas practicando?"],
-        "bajo":       ["¿Tocas en banda o solo practicas?", "¿Qué género te gusta más tocar?"],
-        "violin":     ["¿Cuánto tiempo llevas con él?", "¿Tocas solo o en ensamble?"],
-        "musica":     ["¿También tocas algo o solo escuchas?", "¿Tienes artista favorito?"],
-        "minecraft":  ["¿Qué tipo de mundos construyes?", "¿Juegas solo o con alguien?", "¿Tienes un proyecto actual?"],
-        "videojuegos":["¿Cuánto tiempo le dedicas?", "¿Tienes un género favorito?"],
-        "futbol":     ["¿Juegas o solo ves?", "¿Sigues alguna liga?"],
-        "anime":      ["¿Hay alguno que hayas visto varias veces?", "¿Lo ves en español o japonés?"],
-        "libros":     ["¿Qué estás leyendo ahorita?", "¿Tienes un autor favorito?"],
-        "leer":       ["¿Qué estás leyendo ahorita?", "¿Tienes un autor favorito?"],
-        "pintura":    ["¿Tienes alguna obra propia que te guste mucho?", "¿Cuánto tiempo le dedicas?"],
-        "escritura":  ["¿Estás escribiendo algo ahorita?", "¿Lo compartes o lo guardas?"],
-        "gimnasio":   ["¿Qué entrenas más?", "¿Tienes metas específicas?"],
-        "correr":     ["¿Cuántos kilómetros haces normalmente?", "¿Corres solo o con alguien?"],
-        "programar":  ["¿En qué proyecto estás?", "¿Es hobby o algo más serio?"],
+        "dibujar":     ["¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?", "¿Tienes un estilo favorito?"],
+        "dibujo":      ["¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?", "¿Tienes un estilo favorito?"],
+        "personajes":  ["¿Alguno tiene algo de ti?", "¿Los compartes o los guardas?", "¿Tienes uno favorito de todos los que has creado?"],
+        "guitarra":    ["¿Tocas solo o con alguien?", "¿Qué género tocas más?", "¿Compones algo propio?"],
+        "piano":       ["¿Tocas solo o con alguien?", "¿Qué tipo de música tocas?", "¿Compones algo propio?"],
+        "bateria":     ["¿Tocas en algún grupo?", "¿Cuánto tiempo llevas practicando?"],
+        "bajo":        ["¿Tocas en banda o solo practicas?", "¿Qué género te gusta más tocar?"],
+        "violin":      ["¿Cuánto tiempo llevas con él?", "¿Tocas solo o en ensamble?"],
+        "musica":      ["¿También tocas algo o solo escuchas?", "¿Tienes artista favorito?"],
+        "minecraft":   ["¿Qué tipo de mundos construyes?", "¿Juegas solo o con alguien?", "¿Tienes un proyecto actual?"],
+        "videojuegos": ["¿Cuánto tiempo le dedicas?", "¿Tienes un género favorito?"],
+        "futbol":      ["¿Juegas o solo ves?", "¿Sigues alguna liga?"],
+        "anime":       ["¿Hay alguno que hayas visto varias veces?", "¿Lo ves en español o japonés?"],
+        "libros":      ["¿Qué estás leyendo ahorita?", "¿Tienes un autor favorito?"],
+        "leer":        ["¿Qué estás leyendo ahorita?", "¿Tienes un autor favorito?"],
+        "pintura":     ["¿Tienes alguna obra propia que te guste mucho?", "¿Cuánto tiempo le dedicas?"],
+        "escritura":   ["¿Estás escribiendo algo ahorita?", "¿Lo compartes o lo guardas?"],
+        "escribir":    ["¿Estás escribiendo algo ahorita?", "¿Lo compartes o lo guardas?"],
+        "gimnasio":    ["¿Qué entrenas más?", "¿Tienes metas específicas?"],
+        "correr":      ["¿Cuántos kilómetros haces normalmente?", "¿Corres solo o con alguien?"],
+        "programar":   ["¿En qué proyecto estás?", "¿Es hobby o algo más serio?"],
         "programacion":["¿En qué proyecto estás?", "¿Es hobby o algo más serio?"],
-        "cocinar":    ["¿Tienes un platillo que te salga muy bien?", "¿Cocinas para ti o para más gente?"],
-        "fotografia": ["¿Qué te gusta retratar más?", "¿Editas tus fotos?"],
-        "yoga":       ["¿Qué estilo practicas?", "¿Lo haces en casa o en clase?"],
-        "danza":      ["¿Qué estilo bailas?", "¿Llevas mucho tiempo practicando?"],
-        "viajes":     ["¿A dónde has ido que más te haya marcado?", "¿Viajas solo o acompañado?"],
-        "cafe":       ["¿Cómo lo preparas?", "¿Tienes un café favorito?"],
-        "perro":      ["¿Cuánto tiempo llevas con él?", "¿De qué raza es?"],
-        "gato":       ["¿Cuánto tiempo llevas con él?", "¿Tiene nombre raro o normal?"],
+        "cocinar":     ["¿Tienes un platillo que te salga muy bien?", "¿Cocinas para ti o para más gente?"],
+        "fotografia":  ["¿Qué te gusta retratar más?", "¿Editas tus fotos?"],
+        "yoga":        ["¿Qué estilo practicas?", "¿Lo haces en casa o en clase?"],
+        "danza":       ["¿Qué estilo bailas?", "¿Llevas mucho tiempo practicando?"],
+        "viajes":      ["¿A dónde has ido que más te haya marcado?", "¿Viajas solo o acompañado?"],
+        "cafe":        ["¿Cómo lo preparas?", "¿Tienes un café favorito?"],
+        "perro":       ["¿Cuánto tiempo llevas con él?", "¿De qué raza es?"],
+        "gato":        ["¿Cuánto tiempo llevas con él?", "¿Tiene nombre raro o normal?"],
+        "series":      ["¿Estás viendo algo ahorita?", "¿Prefieres terminarlas rápido o las estiras?"],
+        "peliculas":   ["¿Tienes alguna favorita de todos los tiempos?", "¿Vas al cine o prefieres en casa?"],
+        "manga":       ["¿Lees varios a la vez o uno a la vez?", "¿Tienes un mangaka favorito?"],
+        "poesia":      ["¿Escribes tú también o solo lees?", "¿Tienes poeta favorito?"],
     }
 
     def __init__(self):
@@ -389,91 +472,73 @@ class TopicLock:
         return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
 
     def _detect_topic(self, message: str) -> Optional[str]:
-        """Detecta el tema del mensaje usando aliases y keywords de OPINIONES."""
         msg = self._normalize(message)
-
-        # Primero aliases (más específicos)
         for alias, topic_key in TOPIC_ALIASES.items():
             if self._normalize(alias) in msg:
                 if topic_key in OPINIONES:
                     return topic_key
-
-        # Luego keywords directas
         for keyword in OPINIONES:
             if keyword in msg:
                 return keyword
-
         return None
 
-    def update(self, user_id: str, message: str) -> Optional[str]:
+    def _topic_name(self, topic: str) -> str:
+        return self.TOPIC_NAMES.get(topic, topic)
+
+    def update(self, user_id: str, message: str):
         """
-        Actualiza el estado del topic lock y retorna el topic activo (o None).
+        Retorna (topic_activo, cambio_detectado, topic_anterior)
+        cambio_detectado=True cuando el usuario salta de tema rápido.
         """
         detected = self._detect_topic(message)
         state    = self._state.get(user_id)
 
+        # Sin historial
         if state is None:
             if detected:
                 self._state[user_id] = {
-                    "topic":      detected,
-                    "confidence": 0.65,
-                    "turns":      1,
-                    "asked":      [],
+                    "topic": detected, "confidence": 0.65,
+                    "turns": 1, "asked": [],
                 }
-            return detected
+            return detected, False, None
 
-        # Ya hay topic activo
-        if detected == state["topic"]:
+        prev_topic = state["topic"]
+
+        # Mismo tema
+        if detected == prev_topic:
             state["confidence"] = min(1.0, state["confidence"] + self.BOOST)
-        elif detected is None:
+            state["turns"] += 1
+            return prev_topic, False, None
+
+        # Mensaje ambiguo (sin tema detectado)
+        if detected is None:
             state["confidence"] = max(0.0, state["confidence"] - self.DECAY_AMBIGUOUS)
-        else:
-            state["confidence"] = max(0.0, state["confidence"] - self.DECAY)
+            state["turns"] += 1
+            if state["confidence"] < self.MIN_CONFIDENCE or state["turns"] > self.MAX_TURNS:
+                del self._state[user_id]
+                return None, False, None
+            return prev_topic, False, None
 
-        state["turns"] += 1
-
-        # Liberar si confianza baja o demasiados turnos
-        if state["confidence"] < self.MIN_CONFIDENCE or state["turns"] > self.MAX_TURNS:
-            del self._state[user_id]
-            if detected:
-                self._state[user_id] = {
-                    "topic":      detected,
-                    "confidence": 0.65,
-                    "turns":      1,
-                    "asked":      [],
-                }
-                return detected
-            return None
-
-        # Si cambió de tema con confianza suficiente, actualizar
-        if detected and detected != state["topic"] and state["confidence"] < 0.4:
-            self._state[user_id] = {
-                "topic":      detected,
-                "confidence": 0.65,
-                "turns":      1,
-                "asked":      [],
-            }
-            return detected
-
-        return state["topic"]
+        # Tema diferente detectado → cambio de tema
+        # Si son del mismo grupo (ej: dibujo → personajes) NO es cambio brusco
+        topic_changed = not self._same_group(prev_topic, detected)
+        del self._state[user_id]
+        self._state[user_id] = {
+            "topic": detected, "confidence": 0.65,
+            "turns": 1, "asked": [],
+        }
+        return detected, topic_changed, prev_topic
 
     def get_followup(self, user_id: str) -> Optional[str]:
-        """
-        Retorna una pregunta de seguimiento del tema activo,
-        evitando repetir preguntas ya hechas.
-        """
         state = self._state.get(user_id)
         if not state:
             return None
-
         topic     = state["topic"]
         preguntas = self.FOLLOWUP.get(topic, [])
         asked     = state.get("asked", [])
         restantes = [p for p in preguntas if p not in asked]
-
         if not restantes:
             return None
-
         pregunta = random.choice(restantes)
         state["asked"].append(pregunta)
         return pregunta
@@ -485,18 +550,27 @@ class TopicLock:
     def release(self, user_id: str):
         self._state.pop(user_id, None)
 
+    def topic_change_comment(self, prev_topic: str, new_topic: str) -> str:
+        """Frase natural cuando el usuario cambia de tema rápido."""
+        anterior = self._topic_name(prev_topic)
+        nuevo    = self._topic_name(new_topic)
+        frase    = random.choice(self.TOPIC_CHANGE_COMMENTS)
+        result   = frase.format(anterior=anterior, nuevo=nuevo)
+        result   = result.replace(" a el ", " al ").replace(" de el ", " del ")
+        return result
 
-# Instancia global — se importa desde decision_engine
+
+# Instancia global
 _topic_lock = TopicLock()
 
 
 def get_opinion(message: str, name: str, user_id: str = None) -> Optional[str]:
     """
-    v0.5.6 — Detección en dos pasos + TopicLock.
-      1. Aliases: frases completas con más contexto.
+    v0.5.7 — Detección en dos pasos + TopicLock con cambio de tema.
+      1. Aliases: frases completas.
       2. Keywords: palabras exactas en OPINIONES.
-    Si hay topic activo y el mensaje es ambiguo, usa pregunta de seguimiento.
-    Retorna opinión + pregunta o None si no hay match.
+      3. Si topic activo y mensaje ambiguo → followup.
+      4. Si cambio de tema rápido → comentario + nueva opinión.
     """
     import unicodedata
 
@@ -506,24 +580,38 @@ def get_opinion(message: str, name: str, user_id: str = None) -> Optional[str]:
 
     msg = _normalize(message)
 
-    # Actualizar TopicLock si tenemos user_id
-    active_topic = None
-    if user_id is not None:
-        active_topic = _topic_lock.update(user_id, message)
+    # Actualizar TopicLock
+    active_topic  = None
+    topic_changed = False
+    prev_topic    = None
 
-    # PASO 1 — Aliases (frases completas)
+    if user_id is not None:
+        active_topic, topic_changed, prev_topic = _topic_lock.update(user_id, message)
+
+    # PASO 1 — Aliases
+    matched_opinion = None
     for alias, topic_key in TOPIC_ALIASES.items():
         if _normalize(alias) in msg:
             if topic_key in OPINIONES:
                 opinion, pregunta = OPINIONES[topic_key]
-                return f"{opinion} {pregunta}, {name}?"
+                matched_opinion = f"{opinion} {pregunta}, {name}?"
+                break
 
-    # PASO 2 — Keywords exactas en OPINIONES
-    for keyword, (opinion, pregunta) in OPINIONES.items():
-        if keyword in msg:
-            return f"{opinion} {pregunta}, {name}?"
+    # PASO 2 — Keywords directas (si aliases no matcheó)
+    if matched_opinion is None:
+        for keyword, (opinion, pregunta) in OPINIONES.items():
+            if keyword in msg:
+                matched_opinion = f"{opinion} {pregunta}, {name}?"
+                break
 
-    # PASO 3 — Topic activo con mensaje ambiguo → pregunta de seguimiento
+    # Si hay opinión y hubo cambio de tema → prefacear con comentario
+    if matched_opinion is not None:
+        if topic_changed and prev_topic:
+            comentario = _topic_lock.topic_change_comment(prev_topic, active_topic)
+            return f"{comentario} {matched_opinion}"
+        return matched_opinion
+
+    # PASO 3 — Mensaje ambiguo con topic activo → followup
     if user_id is not None and active_topic:
         followup = _topic_lock.get_followup(user_id)
         if followup:
