@@ -28,8 +28,6 @@ from config.sofia_voice import (
     MOMENTUM_DEPTH_PROMPTS,
     get_opinion,
     OPINIONES,
-)
-from config.sofia_voice_patch import (
     QUOTE_RECALL_PHRASES,
     NIGHT_RESPONSES,
     RESPUESTAS_NOCHE,
