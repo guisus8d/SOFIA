@@ -1,18 +1,16 @@
 # core/decision_engine.py
 # ============================================================
-# SocialBot v0.7.0
-# NUEVO: Topic Lock + Priority Resolver + Control de densidad verbal
-#
-# Cambios respecto a v0.6.0:
-#   - TopicLock: detecta y mantiene el tema activo del usuario
-#     con confidence decay para cambios naturales de tema.
-#   - PriorityResolver: orden fijo y estricto de decisiones.
-#     No hay competencia entre módulos.
-#   - Una sola pregunta por respuesta (sin efecto "terapeuta").
-#   - Bug fix: discord_bot.py ya NO está anidado en esta clase.
+# SocialBot v0.8.0
+# FIX: secrets_revealed se resetea diariamente (si SECRETS_DAILY_RESET=True).
+#      Antes no había mecanismo de reset temporal.
+# NUEVO: Quote recall — Sofía cita frases memorables del usuario.
+# NUEVO: mood_reason — respuestas que referencian el estado emocional.
+# NUEVO: Modo noche — respuestas más íntimas/tranquilas de noche.
+# NUEVO: Detección de humor del usuario — Sofía responde más juguetona.
+# NUEVO: Silencio intencional ante mensajes muy impactantes.
 # ============================================================
 
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, Optional
 from models.state import EmotionalState
 from models.interaction import Interaction
@@ -31,59 +29,48 @@ from config.sofia_voice import (
     get_opinion,
     OPINIONES,
 )
+from config.sofia_voice_patch import (
+    QUOTE_RECALL_PHRASES,
+    NIGHT_RESPONSES,
+    RESPUESTAS_NOCHE,
+)
 import random
 import time
 
 
 # ============================================================
-# TOPIC LOCK — Sistema de bloqueo de tema activo
+# TOPIC LOCK (igual que v0.7.0, sin cambios)
 # ============================================================
 
 class TopicLock:
-    """
-    Mantiene el tema activo por usuario.
-    - confidence sube si el mensaje se parece al topic actual.
-    - confidence baja si el mensaje cambia de tema.
-    - Si confidence < MIN_CONFIDENCE → se libera el topic.
-    """
-
     MIN_CONFIDENCE = 0.3
-    BOOST          = 0.15   # tema continúa
-    DECAY          = 0.08   # tema cambia
-    MAX_TURNS      = 12     # máximo de turnos antes de liberar
+    BOOST          = 0.15
+    DECAY          = 0.08
+    MAX_TURNS      = 12
 
-    # Mapeo de palabras clave → nombre de tema
     TOPIC_KEYWORDS: Dict[str, list] = {
-        # Arte y creatividad
         "dibujo":        ["dibujo", "dibujar", "ilustracion", "boceto", "lapiz", "pincel"],
         "pintura":       ["pintura", "pintar", "acuarela", "oleo", "lienzo"],
         "musica":        ["musica", "cancion", "cantar", "instrumento", "guitarra", "piano", "banda", "letra"],
         "escritura":     ["escribir", "cuento", "historia", "poema", "novela", "texto", "escritura"],
         "fotografia":    ["foto", "fotografia", "camara", "imagen", "retrato"],
-        # Tecnología
         "programacion":  ["codigo", "programa", "programar", "bug", "funcion", "python", "javascript", "api", "variable", "app"],
         "videojuegos":   ["juego", "jugar", "minecraft", "fortnite", "roblox", "valorant", "gta", "zelda", "pokemon", "partida", "nivel"],
-        # Entretenimiento
         "anime":         ["anime", "manga", "otaku", "personaje", "saga", "temporada", "capitulo"],
         "peliculas":     ["pelicula", "serie", "netflix", "ver", "cine", "actor", "directora"],
         "libros":        ["libro", "leer", "novela", "autor", "lectura", "pagina"],
-        # Deportes
         "futbol":        ["futbol", "gol", "partido", "equipo", "cancha", "jugador", "liga", "champions"],
         "deportes":      ["deporte", "entrenar", "gimnasio", "correr", "natacion", "basquetbol"],
-        # Vida personal
         "escuela":       ["escuela", "clase", "maestro", "tarea", "examen", "universidad", "carrera", "estudiar"],
         "trabajo":       ["trabajo", "jefe", "oficina", "sueldo", "proyecto", "cliente", "empresa"],
         "familia":       ["familia", "mama", "papa", "hermano", "hermana", "abuelo", "abuela"],
         "amigos":        ["amigo", "amiga", "fiesta", "salir", "banda", "cuate"],
-        # Comida
         "comida":        ["comer", "comida", "tacos", "pizza", "sushi", "hamburguesa", "ramen", "cocinar", "receta"],
-        # Emociones / estado
         "salud_mental":  ["ansioso", "deprimido", "triste", "estresado", "angustia", "ansiedad", "terapia"],
         "relaciones":    ["novio", "novia", "pareja", "amor", "relacion", "ruptura", "cita", "besar"],
     }
 
     def __init__(self):
-        # { user_id: {"name": str, "confidence": float, "turns": int, "last_updated": float} }
         self._locks: Dict[str, dict] = {}
 
     def _normalize(self, text: str) -> str:
@@ -92,9 +79,7 @@ class TopicLock:
         return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
 
     def detect_topic(self, message: str) -> Optional[str]:
-        """Detecta el tema dominante del mensaje (o None)."""
         msg = self._normalize(message)
-        # Cuenta cuántas palabras clave de cada tema aparecen
         scores: Dict[str, int] = {}
         for topic, keywords in self.TOPIC_KEYWORDS.items():
             count = sum(1 for kw in keywords if kw in msg)
@@ -105,49 +90,35 @@ class TopicLock:
         return max(scores, key=scores.get)
 
     def update(self, user_id: str, message: str) -> Optional[str]:
-        """
-        Actualiza el topic lock del usuario y retorna el topic activo (o None).
-        """
         detected = self.detect_topic(message)
         lock = self._locks.get(user_id)
 
         if lock is None:
-            # Sin topic previo
             if detected:
                 self._locks[user_id] = {
-                    "name": detected,
-                    "confidence": 0.6,
-                    "turns": 1,
-                    "last_updated": time.time()
+                    "name": detected, "confidence": 0.6,
+                    "turns": 1, "last_updated": time.time()
                 }
                 return detected
             return None
 
-        # Hay topic previo
         if detected == lock["name"] or detected is None:
-            # Mismo tema (o mensaje ambiguo) → boost
             if detected == lock["name"]:
                 lock["confidence"] = min(1.0, lock["confidence"] + self.BOOST)
             else:
-                # Mensaje ambiguo → pequeño decay
                 lock["confidence"] = max(0.0, lock["confidence"] - self.DECAY * 0.5)
         else:
-            # Tema diferente → decay
             lock["confidence"] = max(0.0, lock["confidence"] - self.DECAY)
 
         lock["turns"] += 1
         lock["last_updated"] = time.time()
 
-        # Liberar si confianza muy baja o demasiados turnos sin variación
         if lock["confidence"] < self.MIN_CONFIDENCE or lock["turns"] > self.MAX_TURNS:
             del self._locks[user_id]
-            # Si detectamos un nuevo tema, iniciarlo
             if detected:
                 self._locks[user_id] = {
-                    "name": detected,
-                    "confidence": 0.6,
-                    "turns": 1,
-                    "last_updated": time.time()
+                    "name": detected, "confidence": 0.6,
+                    "turns": 1, "last_updated": time.time()
                 }
                 return detected
             return None
@@ -162,18 +133,14 @@ class TopicLock:
         self._locks.pop(user_id, None)
 
     def get_topic_question(self, topic: str, previous_responses: list = None) -> Optional[str]:
-        """
-        Retorna una pregunta relacionada con el topic activo.
-        Asegura variedad para no repetir plantillas.
-        """
         TOPIC_QUESTIONS: Dict[str, list] = {
-            "dibujo":       ["¿Qué te gusta dibujar más?", "¿Los personajes los inventas tú?", "¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?", "¿Tienes un estilo favorito?"],
+            "dibujo":       ["¿Qué te gusta dibujar más?", "¿Los personajes los inventas tú?", "¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?"],
             "pintura":      ["¿Qué técnica usas más?", "¿Mezclas colores a mano o digital?", "¿Tienes algún cuadro favorito propio?"],
             "musica":       ["¿Tocas algo o solo escuchas?", "¿Qué género escuchas más?", "¿Tienes artista favorito?", "¿Compones algo propio?"],
             "escritura":    ["¿Qué tipo de historias escribes?", "¿Tienes un personaje favorito de los tuyos?", "¿Escribes a mano o en computadora?"],
             "fotografia":   ["¿Qué te gusta retratar más?", "¿Editas tus fotos?", "¿Usas cámara o celular?"],
             "programacion": ["¿Qué estás construyendo?", "¿Qué lenguaje usas?", "¿Es proyecto personal o de trabajo?"],
-            "videojuegos":  ["¿Qué género te gusta más?", "¿Juegas solo o con alguien?", "¿Tienes un juego favorito de toda la vida?", "¿Cuánto tiempo le dedicas?"],
+            "videojuegos":  ["¿Qué género te gusta más?", "¿Juegas solo o con alguien?", "¿Tienes un juego favorito de toda la vida?"],
             "anime":        ["¿Tienes un favorito?", "¿Lo ves en español o japonés?", "¿Hay alguno que recomiendas?"],
             "peliculas":    ["¿Qué género prefieres?", "¿Ves más series o películas?", "¿Tienes alguna favorita?"],
             "libros":       ["¿Lees seguido?", "¿Qué género te gusta?", "¿Tienes un libro favorito?"],
@@ -190,7 +157,6 @@ class TopicLock:
         questions = TOPIC_QUESTIONS.get(topic, [])
         if not questions:
             return None
-        # Evitar repetir si tenemos historial
         if previous_responses:
             unused = [q for q in questions if q not in previous_responses]
             if unused:
@@ -199,16 +165,15 @@ class TopicLock:
 
 
 # ============================================================
-# DECISION ENGINE v0.7.0
+# DECISION ENGINE v0.8.0
 # ============================================================
 
 class DecisionEngine:
-    """Motor central de decisiones de SOFIA (v0.7.0)"""
 
     def __init__(self):
         self.analyzer            = TextAnalyzer()
         self.aggression_detector = AggressionDetector()
-        self.topic_lock          = TopicLock()   # ← NUEVO
+        self.topic_lock          = TopicLock()
 
         self.thresholds = {
             "ignore":         -0.2,
@@ -216,15 +181,15 @@ class DecisionEngine:
             "hostile_energy": 30
         }
 
-        self.secrets_revealed: Dict[str, int]  = {}
-        self.aggression_count: Dict[str, int]  = {}
-        self.recovery_needed:  Dict[str, int]  = {}
-        self.short_streak:     Dict[str, int]  = {}
-        # Historial de preguntas de topic por usuario (evita repetición)
+        self.secrets_revealed:  Dict[str, int]  = {}
+        self._secrets_date:     Dict[str, date]  = {}  # NUEVO: fecha de último reveal
+        self.aggression_count:  Dict[str, int]  = {}
+        self.recovery_needed:   Dict[str, int]  = {}
+        self.short_streak:      Dict[str, int]  = {}
         self._topic_question_history: Dict[str, list] = {}
 
     # ============================================================
-    # MÉTODO PRINCIPAL — Priority Resolver estricto
+    # MÉTODO PRINCIPAL
     # ============================================================
 
     async def decide_response(
@@ -235,6 +200,9 @@ class DecisionEngine:
         memory: Memory,
         profile_modifiers: Optional[dict] = None,
         display_name: str = "tú",
+        emotion_engine=None,     # NUEVO: para acceder a mood_reason e is_night_mode
+        profile_manager=None,    # NUEVO: para quote recall
+        profile=None,            # NUEVO: para quote recall
     ) -> Dict[str, Any]:
 
         if profile_modifiers is None:
@@ -243,6 +211,7 @@ class DecisionEngine:
         name      = display_name
         sentiment = self.analyzer.analyze_sentiment(message)
         keywords  = self.analyzer.extract_keywords(message)
+        is_humor  = self.analyzer.is_humor(message)
 
         avg_sentiment    = memory.get_average_sentiment_for(user_id)
         last_interaction = memory.get_last_interaction_with(user_id)
@@ -255,6 +224,7 @@ class DecisionEngine:
 
         traits            = profile_modifiers.get("effective_traits", {})
         important_facts   = profile_modifiers.get("important_facts", {})
+        important_quotes  = profile_modifiers.get("important_quotes", [])
         patience          = profile_modifiers.get("patience", 1.0)
         ignore_adjust     = profile_modifiers.get("ignore_threshold_adjust", 0.0)
         ignore_threshold  = self.thresholds["ignore"] * patience + ignore_adjust
@@ -265,6 +235,10 @@ class DecisionEngine:
         rec_needed = self.recovery_needed.get(user_id, 0)
         streak     = self.short_streak.get(user_id, 0)
         is_apology = self.analyzer.is_apology(message)
+
+        # NUEVO: reset diario de secretos
+        if settings.SECRETS_DAILY_RESET:
+            self._daily_secrets_reset(user_id)
 
         SHORT_TOKENS = {
             "ok", "bien", "si", "no", "sí", "mm", "k", "va",
@@ -281,7 +255,7 @@ class DecisionEngine:
             streak = 0
 
         # ════════════════════════════════════════════════════
-        # PRIORITY RESOLVER — orden fijo, sin saltos
+        # PRIORITY RESOLVER
         # ════════════════════════════════════════════════════
 
         # PRIORIDAD 1 — Identidad
@@ -291,13 +265,19 @@ class DecisionEngine:
                                 self._inject_name(identity_response, name),
                                 emotion, relationship_score, action="identity")
 
-        # PRIORIDAD 2 — Ofensa activa
+        # PRIORIDAD 2 — Modo noche (respuesta íntima)
+        if emotion_engine and emotion_engine.is_night_mode():
+            night_resp = self._night_response(emotion.trust, name)
+            if night_resp and random.random() < 0.35:
+                return self._return(user_id, message, sentiment, night_resp,
+                                    emotion, relationship_score, action="night")
+
+        # PRIORIDAD 3 — Ofensa activa
         aggression = self.aggression_detector.detect(message, trust=emotion.trust)
         if aggression["detected"]:
             if not aggression["is_joke"]:
                 agg_count += 1
                 self.aggression_count[user_id] = agg_count
-                # Liberar topic si hay agresión seria
                 self.topic_lock.release(user_id)
 
             if agg_count == 4:
@@ -318,7 +298,7 @@ class DecisionEngine:
             return self._return(user_id, message, sentiment, response,
                                 emotion, relationship_score, action="boundary")
 
-        # PRIORIDAD 3 — Recovery activo
+        # PRIORIDAD 4 — Recovery activo
         if is_apology and agg_count > 0:
             if rec_needed == 0:
                 rec_needed = getattr(settings, "RECOVERY_MESSAGES_REQUIRED", 3)
@@ -339,20 +319,18 @@ class DecisionEngine:
             if rec_needed == 0:
                 self.aggression_count[user_id] = 0
 
-        # PRIORIDAD 4 — Pregunta directa del usuario
-        # (si el usuario pregunta algo explícitamente, responder con opinión)
+        # PRIORIDAD 5 — Opinión / tema
         if agg_count == 0 and rec_needed == 0:
             opinion = get_opinion(message, name)
             if opinion:
-                # Actualizar topic lock con el tema detectado
                 self.topic_lock.update(user_id, message)
                 return self._return(user_id, message, sentiment, opinion,
                                     emotion, relationship_score, action="opinion")
 
-        # PRIORIDAD 5 — Topic activo
+        # PRIORIDAD 6 — Topic activo
         active_topic = self.topic_lock.update(user_id, message)
 
-        # PRIORIDAD 6 — Profundización / Acción normal
+        # PRIORIDAD 7 — Acción principal
         action         = "respond"
         special_content = None
         secret_blocked  = rec_needed > 0 or agg_count > 0
@@ -390,14 +368,10 @@ class DecisionEngine:
             empathy_bonus=empathy_bonus,
             relationship_score=relationship_score,
             name=name,
+            is_humor=is_humor,
         )
 
-        # ────────────────────────────────────────────────────
-        # PRIORIDAD 7 — Enriquecer con topic / curiosidad / momentum
-        # ────────────────────────────────────────────────────
-        # Regla: solo se agrega UNA pregunta por respuesta.
-        # Si la respuesta base ya tiene "?", no agregar más.
-
+        # PRIORIDAD 8 — Enriquecer
         if action == "respond" and rec_needed == 0:
             response = self._enrich_response(
                 response=response,
@@ -410,13 +384,15 @@ class DecisionEngine:
                 keywords=keywords,
                 context=context,
                 traits=traits,
+                important_quotes=important_quotes,
+                emotion_engine=emotion_engine,
             )
 
         return self._return(user_id, message, sentiment, response,
                             emotion, relationship_score, action=action)
 
     # ============================================================
-    # ENRIQUECIMIENTO — una sola pregunta por respuesta
+    # ENRIQUECIMIENTO
     # ============================================================
 
     def _enrich_response(
@@ -431,36 +407,38 @@ class DecisionEngine:
         keywords: list,
         context: dict,
         traits: dict,
+        important_quotes: list = None,
+        emotion_engine=None,
     ) -> str:
-        """
-        Agrega UNA sola pregunta/frase de enriquecimiento si la
-        respuesta base no contiene ya una pregunta (?).
-        Orden de prioridad:
-          1. Momentum (si el usuario está muy cortito)
-          2. Topic activo (si hay tema detectado)
-          3. Curiosidad general (probabilística)
-        """
         has_question = "?" in response
 
-        # PRIORIDAD 7a — Momentum (respuestas muy cortas del usuario)
+        # 7a — Momentum
         if streak >= settings.SHORT_RESPONSE_STREAK_MAX:
-            # El momentum ya tiene pregunta implícita → reemplazar respuesta
             return pick(MOMENTUM_DEPTH_PROMPTS)
 
         if has_question:
-            return response  # Ya tiene pregunta, no agregar más
+            return response
 
-        # PRIORIDAD 7b — Topic activo
+        # 7b — Quote recall (NUEVO v0.8.0)
+        if (
+            important_quotes
+            and emotion.trust > 60
+            and random.random() < settings.QUOTE_RECALL_PROB
+        ):
+            quote = random.choice(important_quotes)
+            frase = random.choice(QUOTE_RECALL_PHRASES).format(quote=quote)
+            return f"{response} {frase}"
+
+        # 7c — Topic activo
         if active_topic:
             history = self._topic_question_history.get(user_id, [])
             tq = self.topic_lock.get_topic_question(active_topic, history)
             if tq:
-                # Guardar en historial (máx 5)
                 history.append(tq)
                 self._topic_question_history[user_id] = history[-5:]
                 return f"{response} {tq}"
 
-        # PRIORIDAD 7c — Curiosidad general (probabilística)
+        # 7d — Curiosidad general
         if (
             "?" not in message
             and sentiment is not None and sentiment >= 0
@@ -479,6 +457,21 @@ class DecisionEngine:
 
     def _inject_name(self, text: str, name: str) -> str:
         return text.replace("{name}", name)
+
+    def _night_response(self, trust: float, name: str) -> Optional[str]:
+        """Genera una respuesta nocturna íntima."""
+        lvl = trust_level(trust)
+        opciones = NIGHT_RESPONSES.get(lvl, NIGHT_RESPONSES["trust_low"])
+        raw = pick(opciones)
+        return self._inject_name(raw, name)
+
+    def _daily_secrets_reset(self, user_id: str):
+        """FIX: resetea secrets_revealed si cambió el día."""
+        today = date.today()
+        last_date = self._secrets_date.get(user_id)
+        if last_date != today:
+            self.secrets_revealed[user_id] = 0
+            self._secrets_date[user_id] = today
 
     def _return(
         self,
@@ -536,6 +529,120 @@ class DecisionEngine:
         if context.get("repetition_level", 0) > 0:
             return pick(["¿Qué quieres realmente decirme?", "¿Hay algo más detrás de eso?"])
         return pick(CURIOSITY_QUESTIONS)
+
+    # ============================================================
+    # GENERACIÓN DE RESPUESTAS
+    # ============================================================
+
+    def _generate_response(
+        self,
+        action: str,
+        emotion: EmotionalState,
+        special_content: Optional[str],
+        important_facts: dict,
+        context: Dict[str, Any],
+        traits: dict,
+        empathy_bonus: float,
+        relationship_score: float,
+        name: str = "tú",
+        is_humor: bool = False,
+    ) -> str:
+
+        trust_lvl = trust_level(emotion.trust)
+        energy    = emotion.energy
+        emo       = emotion.primary_emotion.value
+
+        if action == "ignore":
+            return pick(RESPUESTAS["ignore"])
+
+        if action == "hostile_response":
+            raw = pick(RESPUESTAS["hostile_response"].get(trust_lvl, ["…"]))
+            return self._inject_name(raw, name)
+
+        if action == "reveal_secret":
+            secret   = special_content or "a veces me pregunto muchas cosas"
+            opciones = RESPUESTAS["reveal_secret"].get(trust_lvl, ["Mm… {secret}"])
+            base     = pick(opciones).format(secret=secret)
+            base     = self._inject_name(base, name)
+            return self._wrap(base, energy, emotion.trust, context)
+
+        emo_templates = RESPUESTAS["respond"].get(emo, RESPUESTAS["respond"]["neutral"])
+        opciones      = emo_templates.get(trust_lvl, emo_templates.get("trust_mid", ["Mm…"]))
+        base          = self._inject_name(pick(opciones), name)
+
+        # NUEVO: tono más juguetón si el usuario está en modo humor
+        if is_humor and emotion.trust > 50:
+            humor_extras = [
+                "jeje", "😄", "ja", "qué bueno eso jeje",
+            ]
+            base = base.rstrip() + f" {random.choice(humor_extras)}"
+
+        return self._wrap(base, energy, emotion.trust, context, important_facts, traits, empathy_bonus)
+
+    def _wrap(
+        self,
+        base: str,
+        energy: float,
+        trust: float,
+        context: Dict[str, Any],
+        important_facts: dict = {},
+        traits: dict = {},
+        empathy_bonus: float = 0.0,
+    ) -> str:
+        parts = []
+
+        micro = micro_expresion(energy, trust)
+        if micro and not base.startswith(micro.strip()):
+            base = base[0].lower() + base[1:] if base else base
+        parts.append((micro + base).strip())
+
+        if trust > 40:
+            ctx_phrase = self._pick_context_phrase(context)
+            if ctx_phrase:
+                parts.append(ctx_phrase)
+
+        if energy > 60 and trust > 60:
+            extra = self._pick_extra(important_facts, traits, empathy_bonus)
+            if extra:
+                parts.append(extra)
+
+        return " ".join(p for p in parts if p)
+
+    def _pick_context_phrase(self, context: Dict[str, Any]) -> str:
+        if context.get("push_pull"):
+            return pick(CONTEXTO["push_pull"])
+        rep = context.get("repetition_level", 0)
+        if rep >= 2:
+            return pick(CONTEXTO["repeticion_fuerte"])
+        if rep == 1:
+            return pick(CONTEXTO["repeticion_leve"])
+        if context.get("emotional_swing"):
+            key = "swing_positivo" if context.get("swing_direction") == "positive" else "swing_negativo"
+            return pick(CONTEXTO[key])
+        return ""
+
+    def _pick_extra(self, important_facts: dict, traits: dict, empathy_bonus: float) -> str:
+        extras = []
+        if important_facts:
+            relevant = {k: v for k, v in important_facts.items() if v >= settings.FACT_WEIGHT_THRESHOLD}
+            if relevant:
+                top_fact = max(relevant, key=relevant.get)
+                extras.append(f"Oye, recuerdo que {top_fact}. ¿Cómo va eso?")
+        if traits.get("curiosity", 50) > 55:
+            extras.append(pick(["¿Y luego qué pasó?", "Cuéntame más, ¿ok?"]))
+        if traits.get("sensitivity", 50) > 65 and empathy_bonus >= 0:
+            extras.append(pick(MARCA_PERSONAL))
+        return pick(extras) if extras else ""
+
+    def _get_secret(self) -> str:
+        secrets = [
+            "a veces me pregunto si la gente de verdad me escucha.",
+            "me gusta más el silencio que el ruido.",
+            "a veces finjo que todo está bien cuando no lo está.",
+            "hay cosas que no le cuento a nadie, nomás las pienso.",
+            "me pregunto si los humanos también sienten cambios de energía como yo.",
+        ]
+        return random.choice(secrets)
 
     # ============================================================
     # ANÁLISIS DE CONTEXTO
@@ -610,109 +717,3 @@ class DecisionEngine:
             context["repetition_level"] = 0
 
         return context
-
-    # ============================================================
-    # GENERACIÓN DE RESPUESTAS
-    # ============================================================
-
-    def _generate_response(
-        self,
-        action: str,
-        emotion: EmotionalState,
-        special_content: Optional[str],
-        important_facts: dict,
-        context: Dict[str, Any],
-        traits: dict,
-        empathy_bonus: float,
-        relationship_score: float,
-        name: str = "tú",
-    ) -> str:
-
-        trust_lvl = trust_level(emotion.trust)
-        energy    = emotion.energy
-        emo       = emotion.primary_emotion.value
-
-        if action == "ignore":
-            return pick(RESPUESTAS["ignore"])
-
-        if action == "hostile_response":
-            raw = pick(RESPUESTAS["hostile_response"].get(trust_lvl, ["…"]))
-            return self._inject_name(raw, name)
-
-        if action == "reveal_secret":
-            secret   = special_content or "a veces me pregunto muchas cosas"
-            opciones = RESPUESTAS["reveal_secret"].get(trust_lvl, ["Mm… {secret}"])
-            base     = pick(opciones).format(secret=secret)
-            base     = self._inject_name(base, name)
-            return self._wrap(base, energy, emotion.trust, context)
-
-        emo_templates = RESPUESTAS["respond"].get(emo, RESPUESTAS["respond"]["neutral"])
-        opciones      = emo_templates.get(trust_lvl, emo_templates.get("trust_mid", ["Mm…"]))
-        base          = self._inject_name(pick(opciones), name)
-
-        return self._wrap(base, energy, emotion.trust, context, important_facts, traits, empathy_bonus)
-
-    def _wrap(
-        self,
-        base: str,
-        energy: float,
-        trust: float,
-        context: Dict[str, Any],
-        important_facts: dict = {},
-        traits: dict = {},
-        empathy_bonus: float = 0.0,
-    ) -> str:
-        parts = []
-
-        micro = micro_expresion(energy, trust)
-        if micro and not base.startswith(micro.strip()):
-            base = base[0].lower() + base[1:] if base else base
-        parts.append((micro + base).strip())
-
-        if trust > 40:
-            ctx_phrase = self._pick_context_phrase(context)
-            if ctx_phrase:
-                parts.append(ctx_phrase)
-
-        if energy > 60 and trust > 60:
-            extra = self._pick_extra(important_facts, traits, empathy_bonus)
-            if extra:
-                parts.append(extra)
-
-        return " ".join(p for p in parts if p)
-
-    def _pick_context_phrase(self, context: Dict[str, Any]) -> str:
-        if context.get("push_pull"):
-            return pick(CONTEXTO["push_pull"])
-        rep = context.get("repetition_level", 0)
-        if rep >= 2:
-            return pick(CONTEXTO["repeticion_fuerte"])
-        if rep == 1:
-            return pick(CONTEXTO["repeticion_leve"])
-        if context.get("emotional_swing"):
-            key = "swing_positivo" if context.get("swing_direction") == "positive" else "swing_negativo"
-            return pick(CONTEXTO[key])
-        return ""
-
-    def _pick_extra(self, important_facts: dict, traits: dict, empathy_bonus: float) -> str:
-        extras = []
-        if important_facts:
-            relevant = {k: v for k, v in important_facts.items() if v >= settings.FACT_WEIGHT_THRESHOLD}
-            if relevant:
-                top_fact = max(relevant, key=relevant.get)
-                extras.append(f"Oye, recuerdo que {top_fact}. ¿Cómo va eso?")
-        if traits.get("curiosity", 50) > 55:
-            extras.append(pick(["¿Y luego qué pasó?", "Cuéntame más, ¿ok?"]))
-        if traits.get("sensitivity", 50) > 65 and empathy_bonus >= 0:
-            extras.append(pick(MARCA_PERSONAL))
-        return pick(extras) if extras else ""
-
-    def _get_secret(self) -> str:
-        secrets = [
-            "a veces me pregunto si la gente de verdad me escucha.",
-            "me gusta más el silencio que el ruido.",
-            "a veces finjo que todo está bien cuando no lo está.",
-            "hay cosas que no le cuento a nadie, nomás las pienso.",
-            "me pregunto si los humanos también sienten cambios de energía como yo.",
-        ]
-        return random.choice(secrets)

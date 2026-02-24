@@ -1,9 +1,13 @@
 # utils/aggression_detector.py
 # ============================================================
-# SocialBot v0.6.0 — Detector de Agresión Contextual
-# FIX: Pesos de impacto aumentados para que se noten en la UI
+# SocialBot v0.8.0
+# FIX CRÍTICO: Uso de word boundaries (re.search con \b) en lugar de
+#   `phrase in msg_norm` — antes "calla" matcheaba en "caballero",
+#   "calle", etc. provocando falsos positivos graves.
+# NUEVO: Reducción de impacto si el usuario está en modo humor.
 # ============================================================
 
+import re
 import unicodedata
 
 
@@ -29,22 +33,33 @@ INSULT_LEVELS = {
     ],
 }
 
-# FIX: Valores aumentados — antes eran muy bajos y se diluían
-# con los multiplicadores 0.3/0.2 del emotion_engine.
-# Ahora se aplican DIRECTO al estado, sin diluir.
 IMPACT_WEIGHTS = {
     "leve":  {"energy": -8.0,  "trust": -6.0,  "damage": 1.0},
     "medio": {"energy": -15.0, "trust": -12.0, "damage": 2.5},
     "alto":  {"energy": -25.0, "trust": -18.0, "damage": 4.0},
 }
 
-# Si el mensaje tiene estos tokens Y trust > 75 → broma, impacto reducido
 JOKE_INDICATORS = {"jaja", "jeje", "jajaja", "jejeje", "lol", "xd", ":v", "😂", "🤣"}
 
 
 def _normalize(text: str) -> str:
     nfkd = unicodedata.normalize("NFD", text)
     return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
+
+
+def _match_phrase(phrase: str, text_norm: str) -> bool:
+    """
+    FIX CRÍTICO: Usa word boundaries para palabras simples.
+    Para frases multi-palabra usa búsqueda de subcadena (más natural).
+    Antes: `phrase in text_norm` → "calla" matcheaba en "caballero".
+    """
+    if " " in phrase:
+        # Frase multi-palabra: subcadena es suficiente
+        return phrase in text_norm
+    else:
+        # Palabra simple: respetar boundaries
+        pattern = r'\b' + re.escape(phrase) + r'\b'
+        return bool(re.search(pattern, text_norm))
 
 
 class AggressionDetector:
@@ -58,8 +73,8 @@ class AggressionDetector:
         Retorna:
           {
             "detected":  bool,
-            "level":     str | None,   # "leve", "medio", "alto"
-            "impact":    dict | None,  # deltas: energy, trust, damage
+            "level":     str | None,
+            "impact":    dict | None,
             "is_joke":   bool,
           }
         """
@@ -69,7 +84,7 @@ class AggressionDetector:
 
         for level in ("alto", "medio", "leve"):
             for phrase in INSULT_LEVELS[level]:
-                if phrase in msg_norm:
+                if _match_phrase(phrase, msg_norm):        # ← FIX aplicado
                     impact = IMPACT_WEIGHTS[level].copy()
                     reported_level = level
 

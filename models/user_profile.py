@@ -1,3 +1,10 @@
+# models/user_profile.py
+# ============================================================
+# SocialBot v0.8.0
+# NUEVO: important_quotes — lista de frases memorables del usuario.
+#        Sofía puede citarlas: "Oye, una vez dijiste que..."
+# ============================================================
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Dict
@@ -5,6 +12,7 @@ from models.state import EmotionalState
 from core.personality_core import PERSONALITY_CORE
 
 RELATIONAL_TRAIT_KEYS = list(PERSONALITY_CORE.keys())
+
 
 @dataclass
 class UserProfile:
@@ -15,17 +23,21 @@ class UserProfile:
     first_seen: Optional[datetime] = None
     last_seen: Optional[datetime] = None
     topics: List[str] = field(default_factory=list)
-    
-    # 🔄 OFFSETS: desviación respecto al núcleo
+
+    # Desviación respecto al núcleo de personalidad
     personality_offsets: Dict[str, float] = field(
         default_factory=lambda: {k: 0.0 for k in RELATIONAL_TRAIT_KEYS}
     )
-    
-    # 🧠 Hechos importantes (memoria selectiva)
+
+    # Hechos importantes (memoria selectiva ponderada)
     important_facts: Dict[str, float] = field(default_factory=dict)
 
-    # ⚠️ NUEVO: Daño relacional acumulado (0 = sin daño, >0 = daño)
+    # Daño relacional acumulado
     relationship_damage: float = 0.0
+
+    # NUEVO v0.8.0 — Frases memorables del usuario
+    # Lista de strings: las mejores/más reveladoras cosas que dijo
+    important_quotes: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -38,11 +50,14 @@ class UserProfile:
             "topics": self.topics,
             "personality_offsets": self.personality_offsets,
             "important_facts": self.important_facts,
-            "relationship_damage": self.relationship_damage   # ← nuevo campo
+            "relationship_damage": self.relationship_damage,
+            "important_quotes": self.important_quotes,  # NUEVO
         }
 
     @classmethod
     def from_dict(cls, data: dict):
+        from models.state import EmotionalState, Emotion
+
         emotional_state_data = data.get("emotional_state")
         emotional_state = EmotionalState.from_dict(emotional_state_data) if emotional_state_data else EmotionalState()
 
@@ -65,8 +80,12 @@ class UserProfile:
         if not isinstance(important_facts, dict):
             important_facts = {}
 
-        # Cargar relationship_damage (si no existe, inicializar a 0)
         relationship_damage = data.get("relationship_damage", 0.0)
+
+        # NUEVO: cargar important_quotes (retrocompatible)
+        important_quotes = data.get("important_quotes", [])
+        if not isinstance(important_quotes, list):
+            important_quotes = []
 
         return cls(
             user_id=data["user_id"],
@@ -78,5 +97,6 @@ class UserProfile:
             topics=topics,
             personality_offsets=offsets,
             important_facts=important_facts,
-            relationship_damage=relationship_damage
+            relationship_damage=relationship_damage,
+            important_quotes=important_quotes,
         )

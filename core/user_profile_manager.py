@@ -1,3 +1,13 @@
+# core/user_profile_manager.py
+# ============================================================
+# SocialBot v0.8.0
+# NUEVO: _extract_memorable_quote — detecta frases con peso emocional
+#        alto y las guarda en profile.important_quotes.
+#        Ejemplos: confesiones, reflexiones, cosas personales.
+# NUEVO: _daily_secrets_reset — si SECRETS_DAILY_RESET=True, el contador
+#        de secretos revelados se resetea automáticamente cada día.
+# ============================================================
+
 import re
 from datetime import datetime
 from typing import Optional, List, Dict
@@ -11,14 +21,17 @@ from config import settings
 from core.personality_core import PERSONALITY_CORE
 
 
-class UserProfileManager:
-    """
-    Gestiona perfiles con:
-    - Memoria ponderada con decaimiento
-    - Evolución de personalidad
-    - Sistema de daño relacional persistente
-    """
+# Patrones que indican una confesión / reflexión personal valiosa
+MEMORABLE_PATTERNS = [
+    re.compile(r'\b(?:siempre|nunca|jamás)\s+.{10,}', re.IGNORECASE),
+    re.compile(r'\b(?:a veces pienso|me pregunto si|tengo miedo de|sueño con|quisiera|ojalá)\s+.{8,}', re.IGNORECASE),
+    re.compile(r'\b(?:lo que más me importa|lo que más quiero|lo que más me duele)\s+.{5,}', re.IGNORECASE),
+    re.compile(r'\b(?:nadie sabe que|no le he dicho a nadie|te confieso)\s+.{5,}', re.IGNORECASE),
+    re.compile(r'\b(?:me arrepiento de|ojala hubiera|si pudiera volver)\s+.{5,}', re.IGNORECASE),
+]
 
+
+class UserProfileManager:
     def __init__(self, db: Database):
         self.db = db
         self.analyzer = TextAnalyzer()
@@ -69,40 +82,32 @@ class UserProfileManager:
         profile: UserProfile,
         interaction: Interaction
     ):
-        """
-        Actualiza:
-        - Hechos (con decaimiento)
-        - Rasgos dinámicos
-        - Daño relacional
-        """
-
-        # 1️⃣ Decaimiento de hechos
+        # 1. Decaimiento de hechos
         self._apply_fact_decay(profile, interaction.timestamp)
 
-        # 2️⃣ Contadores
+        # 2. Contadores
         profile.interaction_count += 1
         profile.last_seen = interaction.timestamp
         if not profile.first_seen:
             profile.first_seen = interaction.timestamp
 
-        # 3️⃣ Estilo comunicación
+        # 3. Estilo comunicación
         style = self._detect_communication_style(interaction.message)
         if style:
             profile.communication_style = style
 
-        # 4️⃣ Temas
+        # 4. Temas
         keywords = self.analyzer.extract_keywords(interaction.message, max_words=3)
         current_topics = set(profile.topics)
         current_topics.update(keywords)
         profile.topics = list(current_topics)[:10]
 
-        # 5️⃣ Hechos importantes
+        # 5. Hechos importantes
         detected_facts = self._extract_facts(interaction.message)
         for fact in detected_facts:
             increment = 1.0
             if interaction.sentiment is not None and abs(interaction.sentiment) > 0.7:
                 increment += 0.5
-
             profile.important_facts[fact] = (
                 profile.important_facts.get(fact, 0.0) + increment
             )
@@ -115,23 +120,24 @@ class UserProfileManager:
             )
             profile.important_facts = dict(sorted_facts[:50])
 
-        # ------------------------------------------------------------
-        # 🆕 SISTEMA DE DAÑO RELACIONAL (v0.3.4)
-        # ------------------------------------------------------------
+        # 6. NUEVO v0.8.0 — Frases memorables
+        quote = self._extract_memorable_quote(interaction.message, interaction.sentiment)
+        if quote:
+            if quote not in profile.important_quotes:
+                profile.important_quotes.append(quote)
+                # Mantener solo las más recientes
+                if len(profile.important_quotes) > settings.MAX_IMPORTANT_QUOTES:
+                    profile.important_quotes = profile.important_quotes[-settings.MAX_IMPORTANT_QUOTES:]
 
+        # 7. Sistema de daño relacional
         if interaction.sentiment is not None:
-
-            # 🔴 Incremento por negatividad
             if interaction.sentiment < -0.3:
                 damage_increment = abs(interaction.sentiment) * 2
                 profile.relationship_damage += damage_increment
 
-            # 🟢 Reparación emocional (dependiente de la confianza actual)
             repair_mult = self.analyzer.get_repair_multiplier(interaction.message)
             if repair_mult > 1.0 and interaction.sentiment >= 0:
                 trust = profile.emotional_state.trust
-
-                # Factor según confianza actual
                 if trust > 70:
                     trust_factor = 1.2
                 elif trust < 40:
@@ -140,37 +146,58 @@ class UserProfileManager:
                     trust_factor = 1.0
 
                 reduction = repair_mult * 1.5 * trust_factor
+                profile.relationship_damage = max(0.0, profile.relationship_damage - reduction)
 
-                profile.relationship_damage = max(
-                    0.0,
-                    profile.relationship_damage - reduction
-                )
-
-        # ------------------------------------------------------------
-        # 🆕 EVOLUCIÓN DE PERSONALIDAD
-        # ------------------------------------------------------------
-
+        # 8. Evolución de personalidad
         if interaction.sentiment is not None:
-
-            # Muy positivo → attachment crece
             if interaction.sentiment > 0.5:
                 profile.personality_offsets["attachment"] += 0.5
-
-            # Muy negativo → boundaries suben
             elif interaction.sentiment < -0.5:
                 profile.personality_offsets["boundary_strength"] += 0.8
                 profile.personality_offsets["attachment"] -= 0.5
 
-        # Clamp offsets
         for k in profile.personality_offsets:
-            profile.personality_offsets[k] = max(
-                -30.0,
-                min(30.0, profile.personality_offsets[k])
-            )
+            profile.personality_offsets[k] = max(-30.0, min(30.0, profile.personality_offsets[k]))
 
         # Guardar
         self.db.save_user_profile(profile)
         self.cache[profile.user_id] = profile
+
+    # ------------------------------------------------------------
+    # NUEVO v0.8.0 — Extracción de frases memorables
+    # ------------------------------------------------------------
+
+    def _extract_memorable_quote(self, message: str, sentiment: Optional[float]) -> Optional[str]:
+        """
+        Detecta si el mensaje contiene una frase personal/confesión memorable.
+        Solo guarda frases largas suficientes (≥ MIN_LENGTH) con sentimiento neutro/alto.
+        """
+        if len(message) < settings.QUOTE_MIN_LENGTH:
+            return None
+
+        # Solo mensajes con sentimiento relevante (no completamente neutros)
+        if sentiment is not None and abs(sentiment) < 0.2:
+            return None
+
+        msg_clean = message.strip()
+
+        for pattern in MEMORABLE_PATTERNS:
+            match = pattern.search(msg_clean)
+            if match:
+                quote = match.group(0).strip()
+                # Limpiar y recortar si es muy larga
+                if len(quote) > 120:
+                    quote = quote[:120].rsplit(' ', 1)[0] + "…"
+                return quote
+
+        return None
+
+    def get_random_quote(self, profile: UserProfile) -> Optional[str]:
+        """Retorna una frase memorable aleatoria del usuario (para que Sofía la cite)."""
+        if not profile.important_quotes:
+            return None
+        import random
+        return random.choice(profile.important_quotes)
 
     # ------------------------------------------------------------
     # DECAY
@@ -180,11 +207,7 @@ class UserProfileManager:
         if not profile.last_seen:
             return
 
-        days_passed = max(
-            0,
-            (current_time - profile.last_seen).total_seconds() / 86400
-        )
-
+        days_passed = max(0, (current_time - profile.last_seen).total_seconds() / 86400)
         if days_passed == 0:
             return
 
@@ -192,7 +215,6 @@ class UserProfileManager:
 
         for fact in list(profile.important_facts.keys()):
             new_weight = profile.important_facts[fact] * decay_factor
-
             if new_weight < settings.FACT_MIN_WEIGHT:
                 del profile.important_facts[fact]
             else:
@@ -213,7 +235,6 @@ class UserProfileManager:
                     match = match[0]
 
                 fact_text = match.strip().lower()
-
                 words = fact_text.split()
                 filtered_words = [w for w in words if w not in self.stopwords]
 
@@ -222,13 +243,12 @@ class UserProfileManager:
 
                 fact_text = " ".join(filtered_words[:5])
                 fact = template.format(fact_text)
-
                 detected.append(fact)
 
         return detected
 
     # ------------------------------------------------------------
-    # ESTILO
+    # ESTILO DE COMUNICACIÓN
     # ------------------------------------------------------------
 
     def _detect_communication_style(self, message: str) -> Optional[str]:
@@ -258,14 +278,10 @@ class UserProfileManager:
     # ------------------------------------------------------------
 
     def get_behavior_modifiers(self, profile: UserProfile) -> dict:
-
         effective_traits = {}
         for k, base in PERSONALITY_CORE.items():
             offset = profile.personality_offsets.get(k, 0.0)
-            effective_traits[k] = max(
-                0.0,
-                min(100.0, base + offset)
-            )
+            effective_traits[k] = max(0.0, min(100.0, base + offset))
 
         top_facts = dict(sorted(
             profile.important_facts.items(),
@@ -280,12 +296,9 @@ class UserProfileManager:
             "patience": 1.0,
             "ignore_threshold_adjust": 0.0,
             "effective_traits": effective_traits,
-            "important_facts": top_facts
+            "important_facts": top_facts,
+            "important_quotes": profile.important_quotes,  # NUEVO
         }
-
-        # ------------------------------------------------------------
-        # Historial + confianza
-        # ------------------------------------------------------------
 
         if profile.interaction_count > 10 and profile.emotional_state.trust > 70:
             modifiers["empathy_bonus"] += 0.2
@@ -295,29 +308,20 @@ class UserProfileManager:
             modifiers["empathy_bonus"] -= 0.1
             modifiers["hostility_threshold"] = 30.0
 
-        # ------------------------------------------------------------
-        # 🆕 Daño relacional
-        # ------------------------------------------------------------
-
         damage = profile.relationship_damage
 
         if damage > 5:
             modifiers["hostility_threshold"] = 25.0
             modifiers["empathy_bonus"] -= 0.2
             modifiers["ignore_threshold_adjust"] = 0.2
-
         elif damage > 2:
             modifiers["hostility_threshold"] = 22.0
             modifiers["empathy_bonus"] -= 0.1
             modifiers["ignore_threshold_adjust"] = 0.1
 
-        # ------------------------------------------------------------
-        # Rasgos efectivos
-        # ------------------------------------------------------------
-
-        boundary = effective_traits.get("boundary_strength", 70)
+        boundary    = effective_traits.get("boundary_strength", 70)
         sensitivity = effective_traits.get("sensitivity", 50)
-        depth = effective_traits.get("depth", 65)
+        depth       = effective_traits.get("depth", 65)
 
         if boundary > 60:
             modifiers["ignore_threshold_adjust"] = 0.1

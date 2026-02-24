@@ -1,10 +1,9 @@
 # storage/database.py
 # ============================================================
-# SocialBot v0.5.0 — Memoria Episódica
-# Cambios:
-#   - Nueva tabla `sessions` para recordar la última sesión
-#   - Métodos: save_session, load_last_session
-#   - Todo lo demás igual, sin romper nada existente
+# SocialBot v0.8.0
+# NUEVO: Columna important_quotes en user_profiles.
+# NUEVO: Columna last_session_tone en sessions.
+# Ambos retrocompatibles con ALTER TABLE IF NOT EXISTS.
 # ============================================================
 
 import sqlite3
@@ -28,7 +27,7 @@ class Database:
         return sqlite3.connect(self.db_path)
 
     # --------------------------------------------------
-    # INIT DATABASE
+    # INIT
     # --------------------------------------------------
 
     def _init_db(self):
@@ -37,7 +36,6 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            # Interactions
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS interactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +49,6 @@ class Database:
                 )
             """)
 
-            # Emotional State Global
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS emotional_state (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -62,7 +59,6 @@ class Database:
                 )
             """)
 
-            # User Profiles
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS user_profiles (
                     user_id TEXT PRIMARY KEY,
@@ -74,36 +70,36 @@ class Database:
                     topics TEXT,
                     personality_traits TEXT,
                     important_facts TEXT,
-                    relationship_damage REAL DEFAULT 0.0
+                    relationship_damage REAL DEFAULT 0.0,
+                    important_quotes TEXT
                 )
             """)
 
-            # -------------------------
-            # 🆕 v0.5.0 — Sessions
-            # Guarda un resumen de la última sesión por usuario.
-            # Solo se mantiene 1 registro por user_id (INSERT OR REPLACE).
-            # -------------------------
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     user_id TEXT PRIMARY KEY,
                     date TEXT NOT NULL,
                     session_count INTEGER DEFAULT 1,
                     topics TEXT,
-                    important_facts TEXT
+                    important_facts TEXT,
+                    last_session_tone TEXT DEFAULT 'neutral'
                 )
             """)
 
             conn.commit()
 
             # Migraciones para DBs existentes
-            for migration in [
+            migrations = [
                 "ALTER TABLE user_profiles ADD COLUMN relationship_damage REAL DEFAULT 0.0",
-            ]:
+                "ALTER TABLE user_profiles ADD COLUMN important_quotes TEXT",    # NUEVO
+                "ALTER TABLE sessions ADD COLUMN last_session_tone TEXT DEFAULT 'neutral'",  # NUEVO
+            ]
+            for migration in migrations:
                 try:
                     cursor.execute(migration)
                     conn.commit()
                 except sqlite3.OperationalError:
-                    pass
+                    pass  # columna ya existe
 
             # Estado emocional inicial
             cursor.execute("SELECT * FROM emotional_state WHERE id = 1")
@@ -177,13 +173,15 @@ class Database:
             topics_str   = ",".join(profile.topics) if profile.topics else None
             traits_json  = json.dumps(profile.personality_offsets) if profile.personality_offsets else None
             facts_json   = json.dumps(profile.important_facts) if profile.important_facts else None
+            quotes_json  = json.dumps(profile.important_quotes) if profile.important_quotes else None  # NUEVO
 
             cursor.execute("""
                 INSERT OR REPLACE INTO user_profiles
                 (user_id, emotional_state, interaction_count,
                  communication_style, first_seen, last_seen,
-                 topics, personality_traits, important_facts, relationship_damage)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 topics, personality_traits, important_facts,
+                 relationship_damage, important_quotes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 profile.user_id,
                 emotional_state_json,
@@ -194,7 +192,8 @@ class Database:
                 topics_str,
                 traits_json,
                 facts_json,
-                profile.relationship_damage
+                profile.relationship_damage,
+                quotes_json,
             ))
             conn.commit()
 
@@ -204,7 +203,8 @@ class Database:
             cursor.execute("""
                 SELECT user_id, emotional_state, interaction_count,
                        communication_style, first_seen, last_seen,
-                       topics, personality_traits, important_facts, relationship_damage
+                       topics, personality_traits, important_facts,
+                       relationship_damage, important_quotes
                 FROM user_profiles WHERE user_id = ?
             """, (user_id,))
 
@@ -217,6 +217,7 @@ class Database:
             traits_data          = json.loads(row[7]) if row[7] else {}
             facts_data           = json.loads(row[8]) if row[8] else {}
             relationship_damage  = row[9] if row[9] is not None else 0.0
+            quotes_data          = json.loads(row[10]) if row[10] else []  # NUEVO
 
             data = {
                 "user_id": row[0],
@@ -228,7 +229,8 @@ class Database:
                 "topics": topics,
                 "personality_traits": traits_data,
                 "important_facts": facts_data,
-                "relationship_damage": relationship_damage
+                "relationship_damage": relationship_damage,
+                "important_quotes": quotes_data,
             }
             return UserProfile.from_dict(data)
 
@@ -246,7 +248,7 @@ class Database:
             return result if result is not None else 0.0
 
     # --------------------------------------------------
-    # 🆕 v0.5.0 — SESSIONS
+    # SESSIONS
     # --------------------------------------------------
 
     def save_session(
@@ -254,36 +256,30 @@ class Database:
         user_id: str,
         topics: List[str],
         important_facts: dict,
-        session_count: int
+        session_count: int,
+        last_session_tone: str = "neutral",   # NUEVO
     ):
-        """
-        Guarda (o actualiza) el resumen de la sesión actual.
-        Solo existe 1 registro por usuario — siempre es la última sesión.
-        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT OR REPLACE INTO sessions
-                (user_id, date, session_count, topics, important_facts)
-                VALUES (?, ?, ?, ?, ?)
+                (user_id, date, session_count, topics, important_facts, last_session_tone)
+                VALUES (?, ?, ?, ?, ?, ?)
             """, (
                 user_id,
                 datetime.now().isoformat(),
                 session_count,
                 ",".join(topics[:10]) if topics else "",
-                json.dumps(important_facts) if important_facts else "{}"
+                json.dumps(important_facts) if important_facts else "{}",
+                last_session_tone,
             ))
             conn.commit()
 
     def load_last_session(self, user_id: str) -> Optional[dict]:
-        """
-        Carga el resumen de la última sesión del usuario.
-        Devuelve None si no existe (usuario nuevo).
-        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT date, session_count, topics, important_facts
+                SELECT date, session_count, topics, important_facts, last_session_tone
                 FROM sessions WHERE user_id = ?
             """, (user_id,))
 
@@ -293,10 +289,12 @@ class Database:
 
             topics = [t.strip() for t in row[2].split(",") if t.strip()] if row[2] else []
             facts  = json.loads(row[3]) if row[3] else {}
+            tone   = row[4] if row[4] else "neutral"  # NUEVO
 
             return {
-                "date":          datetime.fromisoformat(row[0]),
-                "session_count": row[1],
-                "topics":        topics,
-                "important_facts": facts
+                "date":               datetime.fromisoformat(row[0]),
+                "session_count":      row[1],
+                "topics":             topics,
+                "important_facts":    facts,
+                "last_session_tone":  tone,
             }

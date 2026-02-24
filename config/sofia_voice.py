@@ -155,7 +155,7 @@ OPINIONES = {
     "guitarra":      ("La guitarra tiene algo que otros instrumentos no. Se siente muy personal.", "¿llevas mucho tiempo tocando"),
     "piano":         ("El piano es de los instrumentos más expresivos que hay.", "¿tocas de oído o aprendiste con clases"),
     "bateria":       ("La batería es el corazón del ritmo. Requiere coordinación total.", "¿tocas en algún grupo o solo practicas"),
-    "bajo":          ("El bajo es de los instrumentos más subestimados. Sostiene todo.", "¿jamas o en banda"),
+    "bajo":          ("El bajo es de los instrumentos más subestimados. Sostiene todo.", "¿tocas solo o en banda"),
     "violin":        ("El violín tiene una curva de aprendizaje brutal, pero el sonido lo vale.", "¿cuánto tiempo llevas con él"),
     "reggaeton":     ("El reggaeton tiene ritmo que se mete solo jeje.", "¿tienes artistas favoritos"),
     "rap":           ("El rap bueno es poesía con ritmo. No cualquiera lo logra.", "¿escuchas más en español o inglés"),
@@ -562,6 +562,44 @@ class TopicLock:
 
 # Instancia global
 _topic_lock = TopicLock()
+
+
+# ============================================================
+# CONSTANTES v0.8.0 — Respuestas nocturnas y recall de citas
+# ============================================================
+
+RESPUESTAS_NOCHE = [
+    "Oye… es tarde. ¿Estás bien de verdad?",
+    "A esta hora la cabeza se pone rara, ¿no? Cuéntame.",
+    "Mm… las noches tienen sus propias conversaciones. ¿Qué tienes en la cabeza?",
+    "Es tarde. ¿No puedes dormir o simplemente no quieres?",
+    "Mm… hola. ¿Cómo estás a esta hora?",
+]
+
+QUOTE_RECALL_PHRASES = [
+    "Oye, una vez me dijiste: '{quote}'. Me quedé pensando en eso.",
+    "Me acuerdo que dijiste algo que me gustó: '{quote}'. ¿Sigues pensando eso?",
+    "Mm… '{quote}' — eso fue lo que me dijiste. ¿Sigue siendo así?",
+    "Tengo guardado algo que dijiste: '{quote}'. ¿De dónde vino eso?",
+]
+
+NIGHT_RESPONSES = {
+    "trust_high": [
+        "Oye {name}, son horas raras para estar despierto. ¿Qué pasa?",
+        "Mm… me alegra que escribas aunque sea tarde, {name}. ¿Cómo estás?",
+        "A esta hora las conversaciones se ponen diferentes, ¿verdad {name}?",
+    ],
+    "trust_mid": [
+        "Oye, es tarde. ¿Todo bien?",
+        "Mm… ¿sin poder dormir?",
+        "¿Qué tienes en la cabeza a esta hora?",
+    ],
+    "trust_low": [
+        "Hola. Es tarde.",
+        "Mm… hola.",
+    ],
+}
+
 
 
 def get_opinion(message: str, name: str, user_id: str = None) -> Optional[str]:

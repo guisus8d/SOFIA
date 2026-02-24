@@ -1,8 +1,11 @@
 # discord_bot.py
 # ============================================================
-# SocialBot v0.6.0
-# NUEVO: display_name del usuario se pasa al decision_engine
-#        para que Sofía mencione al usuario por nombre.
+# SocialBot v0.8.0
+# CAMBIOS:
+#   - Se pasan emotion_engine, profile y profile_manager a decide_response
+#     para habilitar mood_reason, quote recall y modo noche.
+#   - save_session incluye last_session_tone calculado desde el estado.
+#   - !reset también limpia _secrets_date.
 # ============================================================
 
 import asyncio
@@ -73,7 +76,7 @@ async def on_message(message):
         content = "hola"
 
     user_id      = str(message.author.id)
-    display_name = message.author.display_name   # ← nombre real del usuario
+    display_name = message.author.display_name
 
     async with message.channel.typing():
         response = await process_message(user_id, content, display_name)
@@ -98,13 +101,15 @@ async def process_message(user_id: str, message: str, display_name: str = "tú")
         emotion=profile.emotional_state,
         memory=memory,
         profile_modifiers=modifiers,
-        display_name=display_name,        # ← NUEVO
+        display_name=display_name,
+        emotion_engine=emotion_engine,     # NUEVO
+        profile_manager=profile_manager,   # NUEVO
+        profile=profile,                   # NUEVO
     )
 
     interaction       = decision_result["interaction"]
     repair_multiplier = decision.analyzer.get_repair_multiplier(message)
 
-    # Detectar impacto de agresión para pasarlo al emotion_engine
     aggression_impact = None
     if decision_result["action"] in ("boundary", "silence", "limit"):
         agg = decision.aggression_detector.detect(
@@ -153,7 +158,29 @@ async def reset_cmd(ctx):
     decision.recovery_needed.pop(user_id, None)
     decision.short_streak.pop(user_id, None)
     decision.secrets_revealed.pop(user_id, None)
+    decision._secrets_date.pop(user_id, None)          # NUEVO
+    decision._topic_question_history.pop(user_id, None)
     await ctx.send("🔄 Contadores reseteados.")
+
+
+@bot.command(name="estado")
+async def estado_cmd(ctx):
+    """!estado — muestra el estado emocional actual de Sofía para este usuario (debug)"""
+    user_id = str(ctx.author.id)
+    profile = await profile_manager.get_or_create_profile(user_id)
+    e = profile.emotional_state
+    mood_reason = emotion_engine.get_mood_reason(user_id) or "sin razón particular"
+    quotes_count = len(profile.important_quotes)
+    night = "🌙 sí" if emotion_engine.is_night_mode() else "☀️ no"
+
+    await ctx.send(
+        f"**Estado de Sofía contigo:**\n"
+        f"Emoción: `{e.primary_emotion.value}` | Energía: `{e.energy:.1f}` | Confianza: `{e.trust:.1f}`\n"
+        f"Razón del estado: `{mood_reason}`\n"
+        f"Frases memorables guardadas: `{quotes_count}`\n"
+        f"Modo noche: {night}\n"
+        f"Daño relacional: `{profile.relationship_damage:.2f}`"
+    )
 
 
 # ============================================================

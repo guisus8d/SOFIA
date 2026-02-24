@@ -1,8 +1,11 @@
 # config/settings.py
 # ============================================================
-# SocialBot v0.6.2
-# FIX: Boosts de reparación reducidos para que la confianza
-#      no suba de golpe con una sola disculpa.
+# SocialBot v0.8.0
+# CAMBIOS vs v0.6.2:
+#   - FIX: VERSION sincronizada con header (era 0.5.4)
+#   - NUEVO: Parámetros para memoria episódica (important_quotes)
+#   - NUEVO: Parámetros para modo noche
+#   - NUEVO: SENTIMENT_BACKEND para elegir entre basic/pysentimiento
 # ============================================================
 
 import os
@@ -15,7 +18,7 @@ LOG_DIR  = BASE_DIR / "logs"
 DATABASE_PATH = DATA_DIR / "bot_data.db"
 
 BOT_NAME = "SocialBot"
-VERSION  = "0.5.4"
+VERSION  = "0.8.0"   # FIX: era "0.5.4" — desincronizado con el header
 
 INITIAL_ENERGY = 50.0
 INITIAL_TRUST  = 50.0
@@ -33,10 +36,9 @@ FACT_WEIGHT_THRESHOLD = 3.0
 FACT_MIN_WEIGHT       = 0.5
 
 # FIX: Reducidos para que la recuperación sea gradual y no instantánea
-# Antes: REPAIR_ENERGY_BOOST=6.0, REPAIR_TRUST_BOOST=4.0, APOLOGY_MULTIPLIER=1.5
-REPAIR_ENERGY_BOOST  = 3.0    # ← era 6.0
-REPAIR_TRUST_BOOST   = 2.0    # ← era 4.0
-APOLOGY_MULTIPLIER   = 1.2    # ← era 1.5
+REPAIR_ENERGY_BOOST  = 3.0
+REPAIR_TRUST_BOOST   = 2.0
+APOLOGY_MULTIPLIER   = 1.2
 AFFECTION_MULTIPLIER = 1.2
 
 # Número de mensajes de disculpa necesarios para completar recuperación
@@ -58,3 +60,20 @@ SHORT_RESPONSE_STREAK_MAX  = 3
 # ── Curiosidad Activa ─────────────────────────────────────────────
 CURIOSITY_TRIGGER_PROB     = 0.30
 CURIOSITY_TRUST_MIN        = 50.0
+
+# ── Memoria Episódica (NUEVO v0.8.0) ─────────────────────────────
+MAX_IMPORTANT_QUOTES       = 10    # máximo de frases memorables por usuario
+QUOTE_MIN_LENGTH           = 15    # longitud mínima para guardar una frase como memorable
+QUOTE_RECALL_PROB          = 0.15  # probabilidad de recordar una frase en respuesta
+
+# ── Modo Noche (NUEVO v0.8.0) ─────────────────────────────────────
+NIGHT_MODE_START_HOUR      = 22    # hora en que inicia el modo noche (22:00)
+NIGHT_MODE_END_HOUR        = 6     # hora en que termina el modo noche (06:00)
+
+# ── Backend de Sentimiento (NUEVO v0.8.0) ─────────────────────────
+# Opciones: "basic" (palabras clave, sin dependencias)
+#           "pysentimiento" (modelo IA, requiere: pip install pysentimiento)
+SENTIMENT_BACKEND          = "basic"
+
+# ── Secrets reset diario (NUEVO v0.8.0) ──────────────────────────
+SECRETS_DAILY_RESET        = True   # Si True, secrets_revealed se resetea cada día

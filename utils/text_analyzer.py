@@ -1,81 +1,152 @@
 # utils/text_analyzer.py
 # ============================================================
-# SocialBot v0.3.6 — Fix: normalización de acentos
-# Cambios:
-#   - Nuevo método _normalize() para quitar tildes
-#   - extract_keywords y analyze_sentiment usan _normalize()
-#   - Así "fútbol" y "futbol" se tratan como la misma palabra
+# SocialBot v0.8.0
+# FIX 1: positive_words/negative_words separados en palabras simples
+#         y positive_phrases/negative_phrases para frases multi-palabra.
+#         Antes "te quiero" nunca matcheaba porque el loop era por palabra.
+# FIX 2: Soporte para backend pysentimiento (modelo IA en español).
+#         Configurable en settings.SENTIMENT_BACKEND.
+# NUEVO:  Detección de humor general (no solo agresivo).
 # ============================================================
 
 import re
 import unicodedata
-from typing import List
+from typing import List, Optional
 from config import settings
 
 
 class TextAnalyzer:
-    """Analizador de texto simple basado en palabras clave"""
+    """Analizador de texto con soporte para dos backends de sentimiento."""
 
     def __init__(self):
+        # ── Palabras simples (1 token) ────────────────────────
         self.positive_words = {
-            "gracias", "genial", "buen", "bien", "excelente", "perfecto",
-            "amor", "feliz", "alegre", "maravilloso",
-            "te quiero", "te amo", "helpful", "thanks", "good", "great",
-            "amo", "quiero", "adoro"
+            "gracias", "genial", "excelente", "perfecto",
+            "feliz", "alegre", "maravilloso", "bien",
+            "buen", "amo", "quiero", "adoro", "bueno",
+            "helpful", "thanks", "good", "great",
         }
 
         self.negative_words = {
             "mal", "peor", "odio", "estupido", "tonto", "feo",
-            "horrible", "terrible", "asco",
-            "imbecil", "idiota", "hate", "bad", "stupid",
-            "odias", "detesto", "aborrezco"
+            "horrible", "terrible", "asco", "imbecil", "idiota",
+            "hate", "bad", "stupid", "odias", "detesto", "aborrezco",
         }
+
+        # ── Frases multi-palabra (FIX: antes estaban en positive_words) ──
+        self.positive_phrases = [
+            "te quiero", "te amo", "muchas gracias", "me alegra",
+            "me gusta", "me encanta", "que padre", "eres genial",
+            "me importas", "eres importante", "te adoro",
+        ]
+
+        self.negative_phrases = [
+            "no sirves", "eres un fracaso", "me cae mal",
+            "no me gustas", "me haces enojar",
+        ]
 
         self.intensifiers = {
             "muy", "mucho", "bastante", "demasiado",
-            "super", "really", "very"
+            "super", "really", "very",
         }
 
         self.apology_phrases = [
             "perdon", "lo siento", "disculpa", "perdona",
-            "sorry", "me equivoque", "fue mi culpa", "no quise"
+            "sorry", "me equivoque", "fue mi culpa", "no quise",
         ]
 
         self.affection_phrases = [
             "te quiero", "te amo", "aprecio", "gracias por",
-            "me importas", "eres importante", "te adoro"
+            "me importas", "eres importante", "te adoro",
         ]
 
+        # ── Humor general (NUEVO) ─────────────────────────────
+        self.humor_indicators = {
+            "jaja", "jeje", "lol", "xd", "jajaja", "haha",
+            "😂", "🤣", "💀", ":v", "jiji",
+        }
+
+        # ── Cache para pysentimiento ──────────────────────────
+        self._pysentimiento_analyzer = None
+        self._backend = settings.SENTIMENT_BACKEND
+
+        if self._backend == "pysentimiento":
+            self._load_pysentimiento()
+
+    def _load_pysentimiento(self):
+        """Intenta cargar pysentimiento; si falla, cae al backend básico."""
+        try:
+            from pysentimiento import create_analyzer
+            self._pysentimiento_analyzer = create_analyzer(
+                task="sentiment", lang="es"
+            )
+        except ImportError:
+            self._backend = "basic"
+
     # ---------------------------
-    # NORMALIZACIÓN (Fix v0.3.6)
+    # NORMALIZACIÓN
     # ---------------------------
 
     def _normalize(self, text: str) -> str:
-        """
-        Quita tildes y convierte a minúsculas.
-        'fútbol' → 'futbol', 'perdón' → 'perdon'
-        """
+        """Quita tildes y convierte a minúsculas."""
         nfkd = unicodedata.normalize('NFD', text)
         without_accents = nfkd.encode('ascii', 'ignore').decode('utf-8')
         return without_accents.lower()
 
     # ---------------------------
-    # SENTIMIENTO BASE
+    # SENTIMIENTO
     # ---------------------------
 
     def analyze_sentiment(self, text: str) -> float:
         """
-        Retorna un valor entre -1 (muy negativo) y 1 (muy positivo).
-        Ahora normaliza acentos antes de comparar.
+        Retorna valor entre -1 (muy negativo) y 1 (muy positivo).
+        Usa pysentimiento si está disponible, de lo contrario el método básico.
+        """
+        if self._backend == "pysentimiento" and self._pysentimiento_analyzer:
+            return self._sentiment_pysentimiento(text)
+        return self._sentiment_basic(text)
+
+    def _sentiment_pysentimiento(self, text: str) -> float:
+        """Backend IA — más preciso con sarcasmo y contexto."""
+        try:
+            result = self._pysentimiento_analyzer.predict(text)
+            output = result.output  # "POS", "NEG", "NEU"
+            probas = result.probas  # {"POS": 0.9, "NEG": 0.05, "NEU": 0.05}
+            if output == "POS":
+                return probas.get("POS", 0.5)
+            elif output == "NEG":
+                return -probas.get("NEG", 0.5)
+            else:
+                return 0.0
+        except Exception:
+            return self._sentiment_basic(text)
+
+    def _sentiment_basic(self, text: str) -> float:
+        """
+        Backend básico — palabras clave.
+        FIX: ahora revisa frases multi-palabra ANTES del loop por tokens.
         """
         text_normalized = self._normalize(text)
-        negation_words = {"no", "nunca", "jamas", "not", "never"}
-        words = text_normalized.split()
+        negation_words  = {"no", "nunca", "jamas", "not", "never"}
 
-        score = 0.0
+        score       = 0.0
         found_words = 0
-        negate = False
 
+        # 1. Frases positivas multi-palabra
+        for phrase in self.positive_phrases:
+            if phrase in text_normalized:
+                score += 1.0
+                found_words += 1
+
+        # 2. Frases negativas multi-palabra
+        for phrase in self.negative_phrases:
+            if phrase in text_normalized:
+                score -= 1.0
+                found_words += 1
+
+        # 3. Palabras simples con manejo de negación e intensificadores
+        words  = text_normalized.split()
+        negate = False
         for i, word in enumerate(words):
             word_clean = re.sub(r'[^\w]', '', word)
             if not word_clean:
@@ -107,14 +178,20 @@ class TextAnalyzer:
         return max(-1.0, min(1.0, score / found_words))
 
     # ---------------------------
+    # HUMOR
+    # ---------------------------
+
+    def is_humor(self, text: str) -> bool:
+        """Detecta si el mensaje tiene tono de humor general."""
+        text_lower = text.lower()
+        return any(ind in text_lower for ind in self.humor_indicators)
+
+    # ---------------------------
     # PALABRAS CLAVE
     # ---------------------------
 
     def extract_keywords(self, text: str, max_words: int = 5) -> List[str]:
-        """
-        Extrae palabras clave normalizadas (sin tildes).
-        Así 'fútbol' y 'futbol' producen la misma keyword: 'futbol'
-        """
+        """Extrae palabras clave normalizadas (sin tildes)."""
         normalized = self._normalize(text)
         words = re.findall(r'\b\w+\b', normalized)
 
@@ -123,7 +200,7 @@ class TextAnalyzer:
             "del", "se", "las", "por", "un", "para", "con",
             "no", "una", "su", "al", "lo", "como", "mas",
             "pero", "sus", "le", "ya", "o", "fue", "este",
-            "si", "mi", "hoy", "fue"
+            "si", "mi", "hoy",
         }
 
         keywords = [w for w in words if w not in stopwords and len(w) > 3]

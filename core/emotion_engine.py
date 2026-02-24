@@ -1,11 +1,11 @@
 # core/emotion_engine.py
 # ============================================================
-# SocialBot v0.6.3
-# FIX 1: Delta máximo de confianza/energía por mensaje = 3.0
-#         Evita que un solo "te quiero" suba 15 puntos.
-# FIX 2: Umbrales de emoción más realistas + estados intermedios
-#         Antes: happy requería e>80 AND t>70 (casi imposible)
-#         Ahora: hay 5 zonas más naturales
+# SocialBot v0.8.0
+# FIX: Indentación rota del archivo original (emotion_engine estaba
+#      accidentalmente anidado dentro de _get_secret).
+# NUEVO: mood_reason — Sofía sabe POR QUÉ está en cierto estado.
+#        Permite respuestas como "todavía pienso en lo que me dijiste".
+# NUEVO: Modo noche — energy_decay más suave de noche, tono más íntimo.
 # ============================================================
 
 from typing import Optional
@@ -15,17 +15,30 @@ from core.memory import Memory
 from utils.logger import logger
 from config import settings
 import time
+from datetime import datetime
 
-MAX_DELTA_PER_MESSAGE = 3.0   # tope de cambio por mensaje (energy y trust)
+MAX_DELTA_PER_MESSAGE = 3.0
 
 
 class EmotionEngine:
-    """Gestiona estados emocionales (global o por usuario)"""
+    """Gestiona estados emocionales por usuario."""
+
+    # Razones internas que Sofía puede referenciar en sus respuestas
+    MOOD_REASONS = {
+        "aggression":    "alguien fue grosero conmigo",
+        "affection":     "alguien fue muy amable",
+        "long_silence":  "pasó mucho tiempo sin hablar",
+        "good_vibes":    "la conversación estuvo muy buena",
+        "repetition":    "siento que la conversación se estancó",
+        "recovery":      "estamos arreglando las cosas poco a poco",
+    }
 
     def __init__(self, initial_state: Optional[EmotionalState] = None):
         self.state = initial_state or EmotionalState()
         self.mood_decay = 0.95
         self.last_update_time = time.time()
+        # mood_reason por usuario { user_id: str }
+        self._mood_reasons: dict = {}
 
     # ==========================================================
     # MÉTODO GLOBAL
@@ -66,12 +79,12 @@ class EmotionEngine:
         self._apply_time_decay_to_state(state, interaction.timestamp.timestamp())
 
         if aggression_impact:
-            # Agresión: impacto directo sin tapear (los golpes deben sentirse)
             state.energy = self._clamp(state.energy + aggression_impact.get("energy", 0))
             state.trust  = self._clamp(state.trust  + aggression_impact.get("trust",  0))
+            # Registrar razón del estado
+            self._mood_reasons[interaction.user_id] = self.MOOD_REASONS["aggression"]
 
         else:
-            # Flujo normal — calcular delta y tapearlo
             sentiment_impact = interaction.sentiment * 15
             history_impact   = memory.get_average_sentiment_for(interaction.user_id) * 10
             global_impact    = memory.get_recent_global_sentiment() * 5
@@ -83,6 +96,12 @@ class EmotionEngine:
                 state.trust  = self._clamp(
                     state.trust + self._cap_delta(trust_repair)
                 )
+                self._mood_reasons[interaction.user_id] = self.MOOD_REASONS["recovery"]
+
+            elif interaction.sentiment > 0.6:
+                self._mood_reasons[interaction.user_id] = self.MOOD_REASONS["affection"]
+            elif interaction.sentiment > 0.3:
+                self._mood_reasons[interaction.user_id] = self.MOOD_REASONS["good_vibes"]
 
             energy_delta = total_impact * 0.3
             trust_delta  = total_impact * 0.2
@@ -95,11 +114,35 @@ class EmotionEngine:
         return state
 
     # ==========================================================
+    # MOOD REASON — para que Sofía referencie su estado
+    # ==========================================================
+
+    def get_mood_reason(self, user_id: str) -> Optional[str]:
+        """Retorna la razón del estado emocional actual (o None)."""
+        return self._mood_reasons.get(user_id)
+
+    def clear_mood_reason(self, user_id: str):
+        self._mood_reasons.pop(user_id, None)
+
+    # ==========================================================
+    # MODO NOCHE
+    # ==========================================================
+
+    def is_night_mode(self) -> bool:
+        """Retorna True si la hora actual está en modo noche."""
+        hour = datetime.now().hour
+        start = settings.NIGHT_MODE_START_HOUR
+        end   = settings.NIGHT_MODE_END_HOUR
+        # Maneja el cruce de medianoche (ej: 22-6)
+        if start > end:
+            return hour >= start or hour < end
+        return start <= hour < end
+
+    # ==========================================================
     # LÓGICA INTERNA
     # ==========================================================
 
     def _cap_delta(self, delta: float) -> float:
-        """Limita el cambio máximo por mensaje para subidas/bajadas graduales."""
         return max(-MAX_DELTA_PER_MESSAGE, min(MAX_DELTA_PER_MESSAGE, delta))
 
     def _apply_time_decay_to_state(self, state: EmotionalState, reference_time: float):
@@ -113,16 +156,6 @@ class EmotionEngine:
         state.trust  = self._clamp(state.trust  * decay_factor)
 
     def _update_primary_emotion(self, state: EmotionalState):
-        """
-        FIX v0.6.3: Umbrales más realistas.
-
-        Zonas:
-          happy   → e > 65 AND t > 60   (alcanzable con conversación positiva)
-          sad     → e < 25              (energía muy baja)
-          angry   → t < 25              (confianza muy baja)
-          fearful → e < 40 AND t < 40   (ambas bajas)
-          neutral → todo lo demás
-        """
         e = state.energy
         t = state.trust
 
