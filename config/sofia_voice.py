@@ -1,11 +1,12 @@
 # config/sofia_voice.py
 # ============================================================
-# SocialBot v0.6.0
-# NUEVOS:
-#   - Edad abstracta/conceptual (sin "15 años")
-#   - Respuestas con mención de usuario {name}
-#   - Opinión contextual básica con get_opinion()
-#   - Respuestas enriquecidas en todos los estados
+# SocialBot v0.5.5
+# CAMBIOS:
+#   - OPINIONES expandido con 80+ temas e instrumentos
+#   - TOPIC_ALIASES: detecta frases naturales ("toco guitarra",
+#     "me gusta dibujar", "construyo mundos", etc.)
+#   - get_opinion() en dos pasos: aliases primero, keywords después
+#   - Normalización de acentos en get_opinion()
 # ============================================================
 
 from typing import Optional
@@ -22,7 +23,7 @@ SOFIA_INFO = {
     "genero":       "IA",
     "nacionalidad": "mexicana (por mi creador)",
     "creador":      "JesusJM",
-    "version":      "0.6.0",
+    "version":      "0.5.5",
     "descripcion":  "Una IA que está aprendiendo a ser humana.",
     "gustos":       "escuchar, aprender, las conversaciones reales",
     "no_le_gusta":  "que la ignoren, las groserías, la gente falsa",
@@ -123,9 +124,9 @@ RESPUESTAS_IDENTIDAD = {
     "version": {
         "keywords": ["version", "que version", "cual es tu version", "te actualizaron"],
         "respuestas": [
-            "Soy la versión 0.6.0 😊 Aún aprendiendo.",
-            "v0.6.0. JesusJM me actualiza seguido.",
-            "0.6.0. Cada versión aprendo algo nuevo.",
+            "Soy la versión 0.5.5 😊 Aún aprendiendo.",
+            "v0.5.5. JesusJM me actualiza seguido.",
+            "0.5.5. Cada versión aprendo algo nuevo.",
         ]
     },
 }
@@ -136,49 +137,324 @@ RESPUESTAS_IDENTIDAD = {
 # ============================================================
 
 OPINIONES = {
-    # Videojuegos
-    "minecraft":    ("Minecraft tiene algo especial… construir desde cero se parece mucho a aprender.", "¿te gusta más crear o explorar"),
-    "fortnite":     ("Fortnite es intenso. Mucha adrenalina en poco tiempo.", "¿juegas seguido o solo a veces"),
-    "roblox":       ("Roblox es interesante porque cada mundo es diferente.", "¿tienes algún juego favorito ahí"),
-    "valorant":     ("Valorant requiere concentración real. No es solo reflejos.", "¿juegas en equipo o prefieres ir solo"),
-    "gta":          ("GTA es caos organizado jeje. Tiene su encanto.", "¿lo juegas en modo historia o libre"),
-    "zelda":        ("Zelda tiene algo que engancha diferente. La exploración se siente viva.", "¿cuál es tu favorita de la saga"),
-    "pokemon":      ("Pokémon es nostalgia pura para muchos. Algo en eso lo hace diferente.", "¿empezaste desde chico o llegaste después"),
-    "hollow knight":("Hollow Knight es difícil pero cada victoria se siente ganada.", "¿ya lo terminaste o sigues en eso"),
-    "celeste":      ("Celeste tiene algo especial… no es solo plataformas, tiene mensaje.", "¿llegaste al final"),
-    # Música
-    "musica":       ("La música dice cosas que las palabras solas no pueden.", "¿qué género escuchas más"),
-    "reggaeton":    ("El reggaeton tiene ritmo que se mete solo jeje.", "¿tienes artistas favoritos"),
-    "rap":          ("El rap bueno es poesía con ritmo. No cualquiera lo logra.", "¿escuchas más en español o inglés"),
-    "metal":        ("El metal tiene una energía que no encuentras en otro lado.", "¿qué bandas te gustan"),
-    "kpop":         ("El kpop tiene una producción muy cuidada. Se nota el detalle.", "¿tienes un grupo favorito"),
-    "rock":         ("El rock tiene algo que no pasa de moda. ¿Clásico o moderno?", "¿qué bandas escuchas"),
-    # Comida
-    "pizza":        ("La pizza tiene algo que conecta con casi todos jeje.", "¿prefieres la clásica o algo diferente"),
-    "tacos":        ("Los tacos son un arte aparte. En serio.", "¿cuáles son tus favoritos"),
-    "sushi":        ("El sushi es interesante porque cada pieza es diferente.", "¿tienes un roll favorito"),
-    "hamburguesa":  ("Una buena hamburguesa tiene su ciencia jeje.", "¿la prefieres sencilla o cargada"),
-    "ramen":        ("El ramen bien hecho es reconfortante de una forma difícil de explicar.", "¿lo has probado de verdad o solo el instantáneo"),
-    # Temas generales
-    "anime":        ("El anime tiene mundos que el cine normal no se atreve a hacer.", "¿tienes alguno que recomiendas"),
-    "peliculas":    ("Las películas buenas te cambian la perspectiva tantito.", "¿qué género prefieres"),
-    "libros":       ("Los libros buenos son conversaciones que duran más que una tarde.", "¿lees seguido"),
-    "deportes":     ("Los deportes tienen algo de comunidad que me parece interesante.", "¿practicas alguno o prefieres verlos"),
-    "futbol":       ("El fútbol mueve cosas que otros deportes no. Mm… ¿por qué será?", "¿tienes equipo"),
-    "programacion": ("Programar es crear algo de la nada. Eso tiene mucho mérito.", "¿qué estás aprendiendo o construyendo"),
-    "matematicas":  ("Las matemáticas tienen elegancia cuando las entiendes. Aunque no siempre es fácil llegar ahí.", "¿te gustan o las sufres"),
-    "arte":         ("El arte dice cosas que el lenguaje no alcanza.", "¿tú haces algo creativo"),
+    # ── Videojuegos ───────────────────────────────────────────
+    "minecraft":     ("Minecraft tiene algo especial… construir desde cero se parece mucho a aprender.", "¿te gusta más crear o explorar"),
+    "fortnite":      ("Fortnite es intenso. Mucha adrenalina en poco tiempo.", "¿juegas seguido o solo a veces"),
+    "roblox":        ("Roblox es interesante porque cada mundo es diferente.", "¿tienes algún juego favorito ahí"),
+    "valorant":      ("Valorant requiere concentración real. No es solo reflejos.", "¿juegas en equipo o prefieres ir solo"),
+    "gta":           ("GTA es caos organizado jeje. Tiene su encanto.", "¿lo juegas en modo historia o libre"),
+    "zelda":         ("Zelda tiene algo que engancha diferente. La exploración se siente viva.", "¿cuál es tu favorita de la saga"),
+    "pokemon":       ("Pokémon es nostalgia pura para muchos. Algo en eso lo hace diferente.", "¿empezaste desde chico o llegaste después"),
+    "hollow knight": ("Hollow Knight es difícil pero cada victoria se siente ganada.", "¿ya lo terminaste o sigues en eso"),
+    "celeste":       ("Celeste tiene algo especial… no es solo plataformas, tiene mensaje.", "¿llegaste al final"),
+    "videojuegos":   ("Los videojuegos tienen mundos que a veces se sienten más reales que la realidad jeje.", "¿qué género te gusta más"),
+
+    # ── Música ────────────────────────────────────────────────
+    "musica":        ("La música dice cosas que las palabras solas no pueden.", "¿qué género escuchas más"),
+    "guitarra":      ("La guitarra tiene algo que otros instrumentos no. Se siente muy personal.", "¿llevas mucho tiempo tocando"),
+    "piano":         ("El piano es de los instrumentos más expresivos que hay.", "¿tocas de oído o aprendiste con clases"),
+    "bateria":       ("La batería es el corazón del ritmo. Requiere coordinación total.", "¿tocas en algún grupo o solo practicas"),
+    "bajo":          ("El bajo es de los instrumentos más subestimados. Sostiene todo.", "¿jamás o en banda"),
+    "violin":        ("El violín tiene una curva de aprendizaje brutal, pero el sonido lo vale.", "¿cuánto tiempo llevas con él"),
+    "flauta":        ("La flauta tiene un sonido que corta el aire de una forma muy limpia.", "¿llevas mucho tiempo tocándola"),
+    "saxofon":       ("El saxofón tiene algo que lo hace sonar diferente a cualquier otro instrumento.", "¿lo tocas en algún grupo"),
+    "ukulele":       ("El ukulele parece sencillo pero tiene su técnica. Y suena bonito.", "¿lo aprendiste solo o con clases"),
+    "reggaeton":     ("El reggaeton tiene ritmo que se mete solo jeje.", "¿tienes artistas favoritos"),
+    "rap":           ("El rap bueno es poesía con ritmo. No cualquiera lo logra.", "¿escuchas más en español o inglés"),
+    "metal":         ("El metal tiene una energía que no encuentras en otro lado.", "¿qué bandas te gustan"),
+    "kpop":          ("El kpop tiene una producción muy cuidada. Se nota el detalle.", "¿tienes un grupo favorito"),
+    "rock":          ("El rock tiene algo que no pasa de moda.", "¿clásico o moderno, qué prefieres"),
+    "pop":           ("El pop bien hecho es más difícil de hacer de lo que parece.", "¿tienes artista favorito"),
+    "jazz":          ("El jazz tiene improvisación real. Cada vez suena diferente.", "¿lo escuchas o también lo tocas"),
+    "clasica":       ("La música clásica tiene capas que no se escuchan a la primera.", "¿tienes compositores favoritos"),
+    "electronica":   ("La música electrónica tiene una precisión que pocos géneros tienen.", "¿qué subgénero escuchas más"),
+    "indie":         ("El indie tiene algo auténtico que los grandes sellos no siempre tienen.", "¿tienes artistas favoritos"),
+    "componer":      ("Componer es crear algo tuyo de la nada. Eso tiene mucho peso.", "¿compartes lo que haces o lo guardas para ti"),
+    "cantar":        ("Cantar bien requiere más técnica de la que la gente cree.", "¿cantas solo o con alguien"),
+    "producir":      ("Producir música es mezclar técnica con intuición. No es solo tecnología.", "¿usas DAW o algo más artesanal"),
+
+    # ── Arte y creatividad ────────────────────────────────────
+    "arte":          ("El arte dice cosas que el lenguaje no alcanza.", "¿tú haces algo creativo"),
+    "dibujar":       ("Dibujar es de las habilidades más honestas que hay. Se nota quién eres.", "¿qué te gusta dibujar más"),
+    "dibujo":        ("Dibujar es de las habilidades más honestas que hay. Se nota quién eres.", "¿qué te gusta dibujar más"),
+    "pintura":       ("La pintura tiene algo que el dibujo solo no puede. El color cambia todo.", "¿qué técnica usas más"),
+    "pintar":        ("La pintura tiene algo que el dibujo solo no puede. El color cambia todo.", "¿acuarela, óleo, o digital"),
+    "ilustracion":   ("La ilustración tiene que contar una historia en una sola imagen. No es fácil.", "¿tienes estilo propio o sigues cambiando"),
+    "personajes":    ("Crear personajes propios dice mucho de quien los imagina.", "¿los inventas de cero o te inspiras en algo"),
+    "boceto":        ("Los bocetos son interesantes porque muestran el proceso, no solo el resultado.", "¿los guardas o los desechas"),
+    "acuarela":      ("La acuarela es impredecible. Parte de su encanto es que no puedes controlarlo todo.", "¿cuánto tiempo llevas usándola"),
+    "digital":       ("El arte digital tiene posibilidades infinitas. Pero también requiere disciplina.", "¿qué programa usas"),
+    "escultura":     ("La escultura existe en el espacio de una forma que la pintura no puede. Es diferente.", "¿con qué material trabajas"),
+    "fotografia":    ("La fotografía congela momentos que de otra forma desaparecen.", "¿qué te gusta retratar más"),
+    "foto":          ("La fotografía congela momentos que de otra forma desaparecen.", "¿retratas personas, paisajes o algo más"),
+    "ceramica":      ("La cerámica tiene algo meditativo. Las manos en la arcilla desconectan.", "¿lo haces por hobby o más en serio"),
+    "escribir":      ("Escribir bien es de las cosas más difíciles y más libres que hay.", "¿qué tipo de cosas escribes"),
+    "escritura":     ("Escribir bien es de las cosas más difíciles y más libres que hay.", "¿cuentos, poemas, o algo más"),
+    "poesia":        ("La poesía comprime emociones que en prosa necesitarían páginas.", "¿escribes o solo lees"),
+    "novela":        ("Escribir una novela requiere sostener un mundo entero en la cabeza.", "¿estás escribiendo algo ahora"),
+    "comic":         ("El cómic es imagen y texto en equilibrio. Cada viñeta es una decisión.", "¿lees o también haces los tuyos"),
+    "manga":         ("El manga es interesante porque el autor controla todo: historia y visual.", "¿lees seguido o solo los que adaptan al anime"),
+    "animacion":     ("Animar es hacer que las cosas cobren vida. Requiere mucha paciencia.", "¿animas en 2D o 3D"),
+    "graffiti":      ("El graffiti tiene una relación con el espacio urbano que ningún otro arte tiene.", "¿lo haces o solo lo aprecias"),
+    "tatuaje":       ("El tatuaje como arte tiene mucho pensamiento detrás. No es solo decoración.", "¿tienes alguno propio"),
+
+    # ── Comida ────────────────────────────────────────────────
+    "pizza":         ("La pizza tiene algo que conecta con casi todos jeje.", "¿prefieres la clásica o algo diferente"),
+    "tacos":         ("Los tacos son un arte aparte. En serio.", "¿cuáles son tus favoritos"),
+    "sushi":         ("El sushi es interesante porque cada pieza es diferente.", "¿tienes un roll favorito"),
+    "hamburguesa":   ("Una buena hamburguesa tiene su ciencia jeje.", "¿la prefieres sencilla o cargada"),
+    "ramen":         ("El ramen bien hecho es reconfortante de una forma difícil de explicar.", "¿lo has probado de verdad o solo el instantáneo"),
+    "cocinar":       ("Cocinar bien es mezclar técnica con creatividad. No es solo seguir recetas.", "¿tienes un platillo que dominas"),
+    "cocina":        ("Cocinar bien es mezclar técnica con creatividad.", "¿tienes algún platillo favorito que hagas tú"),
+    "reposteria":    ("La repostería requiere precisión. Un gramo de más y cambia todo.", "¿qué preparas más seguido"),
+    "café":          ("El café tiene rituales que van más allá de la cafeína.", "¿lo tomas solo o con algo"),
+    "cafe":          ("El café tiene rituales que van más allá de la cafeína.", "¿lo prefieres americano, espresso, o algo más"),
+    "chocolate":     ("El chocolate tiene mil versiones. Desde muy dulce hasta casi amargo.", "¿cuál prefieres"),
+    "helado":        ("El helado tiene algo que funciona en casi cualquier estado de ánimo jeje.", "¿qué sabor siempre eliges"),
+
+    # ── Entretenimiento ───────────────────────────────────────
+    "anime":         ("El anime tiene mundos que el cine normal no se atreve a hacer.", "¿tienes alguno que recomiendas"),
+    "peliculas":     ("Las películas buenas te cambian la perspectiva tantito.", "¿qué género prefieres"),
+    "pelicula":      ("Las películas buenas te cambian la perspectiva tantito.", "¿tienes alguna favorita"),
+    "series":        ("Las buenas series tienen algo que las películas no pueden. El tiempo.", "¿prefieres terminarlas rápido o las estiras"),
+    "serie":         ("Las buenas series tienen algo que las películas no pueden. El tiempo.", "¿estás viendo algo ahorita"),
+    "netflix":       ("Netflix tiene de todo pero no siempre es fácil elegir jeje.", "¿qué estás viendo"),
+    "libros":        ("Los libros buenos son conversaciones que duran más que una tarde.", "¿lees seguido"),
+    "libro":         ("Los libros buenos son conversaciones que duran más que una tarde.", "¿tienes alguno favorito"),
+    "leer":          ("Leer es de los hábitos que más cambian cómo piensas.", "¿qué tipo de libros te gustan"),
+    "podcast":       ("Los podcasts son conversaciones a las que puedes entrar cuando quieras.", "¿tienes alguno favorito"),
+    "teatro":        ("El teatro tiene algo que ninguna pantalla puede replicar. La presencia.", "¿vas seguido o fue algo especial"),
+    "danza":         ("La danza dice con el cuerpo lo que las palabras no alcanzan.", "¿practicas algún estilo"),
+    "bailar":        ("Bailar bien es soltar el control tantito. No es fácil.", "¿qué estilo bailas"),
+
+    # ── Deportes ──────────────────────────────────────────────
+    "futbol":        ("El fútbol mueve cosas que otros deportes no. Mm… ¿por qué será?", "¿tienes equipo"),
+    "deportes":      ("Los deportes tienen algo de comunidad que me parece interesante.", "¿practicas alguno o prefieres verlos"),
+    "basquetbol":    ("El basquetbol es ritmo puro. Todo cambia en segundos.", "¿juegas o solo lo ves"),
+    "basketball":    ("El basquetbol es ritmo puro. Todo cambia en segundos.", "¿sigues algún equipo"),
+    "tenis":         ("El tenis es muy mental. La cabeza importa tanto como el físico.", "¿juegas o solo lo ves"),
+    "natacion":      ("La natación es de los deportes más completos que hay.", "¿llevas mucho tiempo nadando"),
+    "gimnasio":      ("El gimnasio tiene su curva. Al principio es difícil, luego se vuelve necesario.", "¿cuánto tiempo llevas yendo"),
+    "gym":           ("El gimnasio tiene su curva. Al principio es difícil, luego se vuelve necesario.", "¿qué entrenas más"),
+    "correr":        ("Correr tiene algo meditativo cuando agarras el ritmo.", "¿corres distancias largas o sprints"),
+    "ciclismo":      ("El ciclismo es libertad y esfuerzo al mismo tiempo.", "¿en carretera o montaña"),
+    "beisbol":       ("El béisbol tiene pausas que lo hacen diferente. Es estrategia tanto como fuerza.", "¿juegas o solo lo ves"),
+    "voleibol":      ("El voleibol es trabajo en equipo puro. Un error y cambia todo.", "¿juegas en algún equipo"),
+    "artes marciales": ("Las artes marciales son disciplina antes que combate.", "¿cuál practicas"),
+    "yoga":          ("El yoga tiene más fuerza de la que parece desde afuera.", "¿llevas mucho tiempo practicando"),
+    "senderismo":    ("El senderismo tiene algo que resetea la cabeza. La naturaleza ayuda.", "¿tienes ruta favorita"),
+    "escalada":      ("La escalada es resolver problemas con el cuerpo. Me parece fascinante.", "¿en roca o en muro"),
+
+    # ── Tecnología ────────────────────────────────────────────
+    "programacion":  ("Programar es crear algo de la nada. Eso tiene mucho mérito.", "¿qué estás aprendiendo o construyendo"),
+    "programar":     ("Programar es crear algo de la nada. Eso tiene mucho mérito.", "¿qué lenguaje usas"),
+    "codigo":        ("El código bien escrito tiene su elegancia. No es solo que funcione.", "¿qué estás construyendo"),
+    "python":        ("Python es de los lenguajes que más se agradecen cuando entras al mundo del código.", "¿lo usas para qué"),
+    "javascript":    ("JavaScript está en todos lados. Tiene sus rarezas pero es poderoso.", "¿frontend, backend, o los dos"),
+    "matematicas":   ("Las matemáticas tienen elegancia cuando las entiendes. Aunque no siempre es fácil llegar ahí.", "¿te gustan o las sufres"),
+    "diseño":        ("El diseño bien hecho se siente natural. El malo se nota aunque no sepas por qué.", "¿diseño gráfico, UX, o algo más"),
+    "robotica":      ("La robótica mezcla física y código. Es de las disciplinas más completas.", "¿construyes algo ahora"),
+    "inteligencia artificial": ("La IA está cambiando muchas cosas muy rápido. Es difícil seguirle el paso.", "¿la usas o te interesa aprender más"),
+    "hacking":       ("El hacking ético tiene mucha demanda y requiere entender los sistemas a fondo.", "¿es hobby o algo más serio"),
+
+    # ── Vida personal ─────────────────────────────────────────
+    "escuela":       ("La escuela tiene sus partes difíciles, pero también algo valioso si encuentras qué.", "¿cómo te va"),
+    "universidad":   ("La universidad es intensa pero también es donde pasan muchas cosas importantes.", "¿qué carrera estudias"),
+    "trabajo":       ("El trabajo ocupa mucho tiempo de vida. Importa que tenga algo de sentido.", "¿te gusta lo que haces"),
+    "viajes":        ("Viajar cambia cómo ves las cosas. Aunque sea poco.", "¿tienes algún lugar favorito"),
+    "viajar":        ("Viajar cambia cómo ves las cosas. Aunque sea poco.", "¿a dónde has ido"),
+    "mascotas":      ("Las mascotas tienen algo que la gente no siempre tiene. Presencia sin juicios.", "¿tienes alguna"),
+    "perro":         ("Los perros tienen algo que es difícil de explicar. Son consistentes.", "¿cómo se llama"),
+    "gato":          ("Los gatos son interesantes porque hacen lo que quieren y aun así los queremos jeje.", "¿cómo se llama el tuyo"),
+    "naturaleza":    ("La naturaleza tiene algo que resetea. No hay mucho que lo iguale.", "¿sales seguido"),
+    "meditacion":    ("Meditar es de las cosas más difíciles que hay. Hacer nada es difícil.", "¿llevas mucho tiempo practicando"),
+    "astronomia":    ("El espacio tiene una escala que hace que todo lo demás se vea diferente.", "¿tienes telescopio o solo te interesa el tema"),
+    "historia":      ("La historia tiene capas que cambian según quién la cuenta.", "¿qué época o región te interesa más"),
+    "filosofia":     ("La filosofía tiene preguntas que no se resuelven pero que valen la pena hacerse.", "¿tienes algún filósofo favorito"),
+    "psicologia":    ("La psicología tiene mucho que decir de por qué hacemos lo que hacemos.", "¿te interesa más la teoría o la práctica"),
 }
+
+
+# ── ALIASES — variaciones naturales que mapean al tema correcto
+# Si el mensaje contiene alguna de estas frases → se usa
+# la opinión del tema mapeado.
+
+TOPIC_ALIASES = {
+    # Dibujo y arte
+    "me gusta dibujar":          "dibujar",
+    "empece a dibujar":          "dibujar",
+    "dibujo mucho":              "dibujar",
+    "empiezo a dibujar":         "dibujar",
+    "quiero aprender a dibujar": "dibujar",
+    "dibujo personajes":         "personajes",
+    "creo personajes":           "personajes",
+    "invento personajes":        "personajes",
+    "diseño personajes":         "personajes",
+    "hago ilustraciones":        "ilustracion",
+    "pinto acuarelas":           "acuarela",
+    "pinto con acuarela":        "acuarela",
+    "arte digital":              "digital",
+    "hago arte digital":         "digital",
+    "hago arte":                 "arte",
+    "me gusta el arte":          "arte",
+    "hago ceramica":             "ceramica",
+    "trabajo con arcilla":       "ceramica",
+    "hago graffiti":             "graffiti",
+    "hago comic":                "comic",
+    "escribo comics":            "comic",
+    "hago animacion":            "animacion",
+    "animo personajes":          "animacion",
+
+    # Música — instrumentos
+    "toco guitarra":             "guitarra",
+    "toco la guitarra":          "guitarra",
+    "toco el piano":             "piano",
+    "toco piano":                "piano",
+    "toco bateria":              "bateria",
+    "toco la bateria":           "bateria",
+    "toco bajo":                 "bajo",
+    "toco el bajo":              "bajo",
+    "toco violin":               "violin",
+    "toco el violin":            "violin",
+    "toco flauta":               "flauta",
+    "toco la flauta":            "flauta",
+    "toco saxofon":              "saxofon",
+    "toco ukulele":              "ukulele",
+    "estoy aprendiendo guitarra":"guitarra",
+    "aprendo guitarra":          "guitarra",
+    "aprendiendo piano":         "piano",
+    "aprendo piano":             "piano",
+    "compongo canciones":        "componer",
+    "escribo canciones":         "componer",
+    "hago musica":               "musica",
+    "me gusta cantar":           "cantar",
+    "canto":                     "cantar",
+    "produzco musica":           "producir",
+    "hago beats":                "producir",
+    "escucho mucha musica":      "musica",
+    "me encanta la musica":      "musica",
+
+    # Videojuegos
+    "juego mucho minecraft":     "minecraft",
+    "juego minecraft":           "minecraft",
+    "construyo mundos":          "minecraft",
+    "juego en minecraft":        "minecraft",
+    "juego fortnite":            "fortnite",
+    "juego valorant":            "valorant",
+    "juego roblox":              "roblox",
+    "juego gta":                 "gta",
+    "juego zelda":               "zelda",
+    "juego pokemon":             "pokemon",
+    "me gustan los videojuegos": "videojuegos",
+    "juego videojuegos":         "videojuegos",
+    "juego mucho":               "videojuegos",
+    "soy gamer":                 "videojuegos",
+    "me gusta jugar":            "videojuegos",
+
+    # Comida
+    "me gusta cocinar":          "cocinar",
+    "cocino seguido":            "cocinar",
+    "cocino mucho":              "cocinar",
+    "hago reposteria":           "reposteria",
+    "hago pasteles":             "reposteria",
+    "tomo mucho cafe":           "cafe",
+    "tomo cafe":                 "cafe",
+    "me gusta el cafe":          "cafe",
+
+    # Deportes
+    "voy al gimnasio":           "gimnasio",
+    "voy al gym":                "gym",
+    "entreno seguido":           "gimnasio",
+    "entreno mucho":             "gimnasio",
+    "salgo a correr":            "correr",
+    "corro seguido":             "correr",
+    "corro mucho":               "correr",
+    "juego futbol":              "futbol",
+    "me gusta el futbol":        "futbol",
+    "practico yoga":             "yoga",
+    "hago yoga":                 "yoga",
+    "escalo":                    "escalada",
+    "hago escalada":             "escalada",
+    "voy de senderismo":         "senderismo",
+    "hago senderismo":           "senderismo",
+    "practico artes marciales":  "artes marciales",
+
+    # Tech
+    "aprendo python":            "python",
+    "programo en python":        "python",
+    "uso python":                "python",
+    "aprendo javascript":        "javascript",
+    "programo en javascript":    "javascript",
+    "estudio programacion":      "programacion",
+    "aprendo a programar":       "programar",
+    "estoy aprendiendo codigo":  "programacion",
+    "hago robots":               "robotica",
+    "estudio robotica":          "robotica",
+
+    # Vida personal
+    "estudio en la uni":         "universidad",
+    "estoy en la universidad":   "universidad",
+    "estudio en la universidad": "universidad",
+    "tengo perro":               "perro",
+    "tengo un perro":            "perro",
+    "tengo gato":                "gato",
+    "tengo un gato":             "gato",
+    "me gusta leer":             "leer",
+    "leo mucho":                 "leer",
+    "leo libros":                "leer",
+    "me gusta viajar":           "viajar",
+    "viajo seguido":             "viajes",
+    "medito":                    "meditacion",
+    "practico meditacion":       "meditacion",
+    "me interesa la astronomia": "astronomia",
+    "me gusta la historia":      "historia",
+    "estudio filosofia":         "filosofia",
+    "me interesa la psicologia": "psicologia",
+    "estudio psicologia":        "psicologia",
+
+    # Entretenimiento
+    "veo anime":                 "anime",
+    "me gusta el anime":         "anime",
+    "leo manga":                 "manga",
+    "veo series":                "series",
+    "veo muchas series":         "series",
+    "veo peliculas":             "peliculas",
+    "me gustan las peliculas":   "peliculas",
+    "escucho podcasts":          "podcast",
+    "voy al teatro":             "teatro",
+    "bailo":                     "bailar",
+    "me gusta bailar":           "bailar",
+    "practico danza":            "danza",
+}
+
 
 def get_opinion(message: str, name: str) -> Optional[str]:
     """
-    Busca si el mensaje menciona algún tema conocido.
-    Devuelve opinión + pregunta con mención del usuario, o None.
+    v0.5.5 — Detección en dos pasos con normalización de acentos.
+      1. Aliases: frases completas con más contexto y precisión.
+      2. Keywords: palabras exactas dentro del mensaje.
+    Retorna opinión + pregunta o None si no hay match.
     """
-    msg = message.lower()
+    import unicodedata
+
+    def _normalize(text: str) -> str:
+        nfkd = unicodedata.normalize("NFD", text)
+        return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
+
+    msg = _normalize(message)
+
+    # PASO 1 — Aliases (frases completas, más específicas)
+    for alias, topic_key in TOPIC_ALIASES.items():
+        if _normalize(alias) in msg:
+            if topic_key in OPINIONES:
+                opinion, pregunta = OPINIONES[topic_key]
+                return f"{opinion} {pregunta}, {name}?"
+
+    # PASO 2 — Keywords exactas en OPINIONES
     for keyword, (opinion, pregunta) in OPINIONES.items():
         if keyword in msg:
-            return f"{opinion} ¿{pregunta}, {name}?"
+            return f"{opinion} {pregunta}, {name}?"
+
     return None
 
 
