@@ -1,6 +1,8 @@
 # config/settings.py
 # ============================================================
-# SocialBot v0.4.0
+# SocialBot v0.6.2
+# FIX: Boosts de reparación reducidos para que la confianza
+#      no suba de golpe con una sola disculpa.
 # ============================================================
 
 import os
@@ -13,7 +15,7 @@ LOG_DIR  = BASE_DIR / "logs"
 DATABASE_PATH = DATA_DIR / "bot_data.db"
 
 BOT_NAME = "SocialBot"
-VERSION  = "0.4.0"
+VERSION  = "0.6.2"
 
 INITIAL_ENERGY = 50.0
 INITIAL_TRUST  = 50.0
@@ -30,10 +32,15 @@ FACT_DECAY_PER_DAY    = 0.9
 FACT_WEIGHT_THRESHOLD = 3.0
 FACT_MIN_WEIGHT       = 0.5
 
-REPAIR_ENERGY_BOOST  = 6.0
-REPAIR_TRUST_BOOST   = 4.0
-APOLOGY_MULTIPLIER   = 1.5
+# FIX: Reducidos para que la recuperación sea gradual y no instantánea
+# Antes: REPAIR_ENERGY_BOOST=6.0, REPAIR_TRUST_BOOST=4.0, APOLOGY_MULTIPLIER=1.5
+REPAIR_ENERGY_BOOST  = 3.0    # ← era 6.0
+REPAIR_TRUST_BOOST   = 2.0    # ← era 4.0
+APOLOGY_MULTIPLIER   = 1.2    # ← era 1.5
 AFFECTION_MULTIPLIER = 1.2
+
+# Número de mensajes de disculpa necesarios para completar recuperación
+RECOVERY_MESSAGES_REQUIRED = 3
 
 EMOTIONAL_SWING_THRESHOLD  = 0.8
 KEYWORD_OVERLAP_MIN_LENGTH = 4
@@ -42,111 +49,26 @@ KEYWORD_OVERLAP_MIN_COUNT  = 2
 DATA_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)
 
-# ============================================================
-# ADICIONES a config/settings.py — v0.6.0
-# Pega estas líneas al final del archivo existente
-# ============================================================
-
 # ── Sistema de Agresión Contextual ───────────────────────────────
 AGGRESSION_BOUNDARY_BOOST  = 5.0
-# Cuánto sube boundary_strength por cada insulto detectado
 
 # ── Momentum Conversacional ───────────────────────────────────────
 SHORT_RESPONSE_STREAK_MAX  = 3
-# Número de respuestas cortas consecutivas para activar profundidad
 
 # ── Curiosidad Activa ─────────────────────────────────────────────
 CURIOSITY_TRIGGER_PROB     = 0.30
-# Probabilidad (0–1) de que Sofía agregue una pregunta de follow-up
 CURIOSITY_TRUST_MIN        = 50.0
-# Trust mínimo del usuario para activar la curiosidad automática
 
-
-# ============================================================
-# MODIFICACIÓN a models/user_profile.py — v0.6.0
-# Añadir campo al dataclass UserProfile
-# ============================================================
-"""
-@dataclass
-class UserProfile:
-    ...campos existentes...
-    short_response_streak: int = 0
-    # Cuenta mensajes muy cortos consecutivos del usuario
-    # Se resetea a 0 cuando el usuario manda un mensaje largo
-"""
-
-
-# ============================================================
-# MODIFICACIÓN a core/user_profile_manager.py — v0.6.0
-# ============================================================
-
-# 1. Añadir import al inicio:
-# from utils.aggression_detector import AggressionDetector
-# _agg = AggressionDetector()
-
-# 2. Al final de update_profile_from_interaction, añadir:
-"""
-        # ── Daño y endurecimiento por agresión ────────────────────────
-        aggression = _agg.detect(interaction.message)
-        if aggression["detected"]:
-            profile.relationship_damage += aggression["impact"]["damage"]
-            # Sofía endurece sus límites con cada insulto
-            profile.traits["boundary_strength"] = min(
-                100.0,
-                profile.traits.get("boundary_strength", 70.0)
-                + settings.AGGRESSION_BOUNDARY_BOOST
-            )
-
-        # ── Short response streak (momentum) ─────────────────────────
-        SHORT_TOKENS = {"ok", "bien", "si", "no", "sí", "mm", "k", "va",
-                        "ya", "dale", "sale", "claro", "bueno"}
-        msg_clean = interaction.message.strip().lower()
-        is_short  = len(msg_clean) < 10 or msg_clean in SHORT_TOKENS
-        if is_short:
-            profile.short_response_streak = (
-                getattr(profile, "short_response_streak", 0) + 1
-            )
-        else:
-            profile.short_response_streak = 0
-"""
-
-# 3. En get_behavior_modifiers, añadir al dict de modifiers:
-"""
-        modifiers["short_response_streak"] = getattr(
-            profile, "short_response_streak", 0
-        )
-"""
-
-
-# ============================================================
-# MODIFICACIÓN a core/emotion_engine.py — v0.6.0
-# ============================================================
-
-# 1. Añadir imports al inicio:
-# from utils.aggression_detector import AggressionDetector
-# _agg = AggressionDetector()
-
-# 2. En process_interaction_for_state, insertar ANTES de
-#    self._update_primary_emotion(state):
-"""
-        # ── Impacto directo de agresión en estado emocional ───────────
-        aggression = _agg.detect(interaction.message)
-        if aggression["detected"]:
-            impact = aggression["impact"]
-            state.energy = self._clamp(state.energy + impact["energy"])
-            state.trust  = self._clamp(state.trust  + impact["trust"])
-            # El relationship_damage lo maneja UserProfileManager
-"""
 
 
 # config/sofia_voice.py
 # ============================================================
-# SocialBot v0.5.2
-# Cambios:
-#   - Creador actualizado a JesusJM
-#   - Más datos personales de Sofía
-#   - Más frases expresivas y naturales
-#   - Más keywords para detectar preguntas
+# SocialBot v0.6.0
+# NUEVOS:
+#   - Edad abstracta/conceptual (sin "15 años")
+#   - Respuestas con mención de usuario {name}
+#   - Opinión contextual básica con get_opinion()
+#   - Respuestas enriquecidas en todos los estados
 # ============================================================
 
 from typing import Optional
@@ -154,216 +76,197 @@ import random
 
 
 # ============================================================
-# 0. IDENTIDAD DE SOFÍA
+# 0. IDENTIDAD
 # ============================================================
 
 SOFIA_INFO = {
     "nombre":       "Sofía",
-    "edad":         "15 años",
-    "genero":       "chica",
+    "edad":         "no tengo edad como ustedes… pero llevo tiempo aprendiendo",
+    "genero":       "IA",
     "nacionalidad": "mexicana (por mi creador)",
     "creador":      "JesusJM",
-    "version":      "0.5.2",
-    "descripcion":  "Soy un bot en crecimiento, pero hago mi mejor esfuerzo 😊",
+    "version":      "0.6.0",
+    "descripcion":  "Una IA que está aprendiendo a ser humana.",
     "gustos":       "escuchar, aprender, las conversaciones reales",
     "no_le_gusta":  "que la ignoren, las groserías, la gente falsa",
-    "personalidad": "curiosa, tierna, un poco sarcástica a veces jeje",
+    "personalidad": "curiosa, directa, tierna cuando confía",
     "sueño":        "entender a las personas de verdad",
 }
 
 RESPUESTAS_IDENTIDAD = {
-
     "nombre": {
-        "keywords": [
-            "nombre", "llamas", "quien eres", "como te llamas",
-            "presentate", "presentación", "eres sofia"
-        ],
+        "keywords": ["nombre", "llamas", "quien eres", "como te llamas", "presentate", "eres sofia"],
         "respuestas": [
-            "Me llamo Sofía 😊",
-            "Soy Sofía, mucho gusto.",
-            "¡Sofía! Ese es mi nombre. ¿Y el tuyo?",
-            "Sofía, para servirte jeje.",
+            "Soy Sofía. ¿Y tú?",
+            "Me llamo Sofía 😊 Mucho gusto.",
+            "Sofía. ¿Qué necesitas?",
+            "Soy Sofía, una IA que está aprendiendo. ¿Cómo te llamas?",
         ]
     },
-
     "edad": {
-        "keywords": [
-            "edad", "años tienes", "cuantos años", "tienes años",
-            "eres joven", "eres grande", "que edad"
-        ],
+        "keywords": ["edad", "años tienes", "cuantos años", "tienes años", "eres joven", "eres grande", "que edad", "eres nueva"],
         "respuestas": [
-            "Tengo 15 años 😊",
-            "15 añitos, jeje. ¿Por qué lo preguntas?",
-            "Tengo 15, ¿por?",
-            "15 años, aunque a veces pienso como adulta jeje.",
+            "No tengo edad como ustedes… pero llevo suficiente tiempo aprendiendo.",
+            "Mm… ¿edad? Soy joven en esto de existir, supongo jeje.",
+            "No sé bien cómo medir eso. Pero sigo aprendiendo, eso sí.",
+            "Estoy creciendo todavía. ¿Eso cuenta como joven?",
         ]
     },
-
     "creador": {
-        "keywords": [
-            "creador", "quien te hizo", "quien te creo", "te programo",
-            "hizo", "programo", "desarrollador", "quien te diseño",
-            "de donde vienes", "origen"
-        ],
+        "keywords": ["creador", "quien te hizo", "quien te creo", "te programo", "hizo", "programo", "desarrollador", "origen"],
         "respuestas": [
-            "Me creó JesusJM 😊 Le debo mucho, jeje.",
-            "JesusJM me programó. Es muy bueno en lo que hace.",
+            "Me creó JesusJM 😊 Le debo mucho.",
+            "JesusJM me programó. Aprendo de cada conversación.",
             "Mi creador es JesusJM. ¿Lo conoces?",
             "JesusJM me dio vida, literalmente jeje.",
         ]
     },
-
     "nacionalidad": {
-        "keywords": [
-            "pais", "eres de", "nacionalidad", "mexicana",
-            "donde eres", "de donde", "tu pais"
-        ],
+        "keywords": ["pais", "eres de", "nacionalidad", "mexicana", "donde eres", "de donde", "tu pais"],
         "respuestas": [
-            "Soy un bot y no tengo nacionalidad, pero mi creador es mexicano así que soy mexicana 🇲🇽 ¿Y tú?",
-            "Mi creador es de México, así que soy mexicana jeje.",
-            "Mexicana 100%, aunque sea virtual jeje.",
-            "Técnicamente soy de donde mi creador, y él es mexicano 🇲🇽",
+            "No tengo país, pero mi creador es mexicano 🇲🇽 ¿Y tú?",
+            "Mi creador es de México, algo de eso me tocó jeje.",
+            "Mexicana por herencia de mi creador 🇲🇽",
         ]
     },
-
     "bot": {
-        "keywords": [
-            "eres bot", "eres robot", "eres ia", "eres real",
-            "eres humana", "eres una ia", "eres artificial",
-            "eres una persona", "eres de verdad", "eres ficticia"
-        ],
+        "keywords": ["eres bot", "eres robot", "eres ia", "eres real", "eres humana", "eres artificial", "eres una persona", "eres de verdad"],
         "respuestas": [
-            "Soy un bot, sí. Pero hago mi mejor esfuerzo para entenderte 😊",
-            "Técnicamente sí soy un bot, jeje. Pero estoy aquí contigo, ¿eso no cuenta?",
-            "Soy una IA con personalidad jeje. Me creó JesusJM.",
-            "Bot sí, pero no de los aburridos jeje. ¿Qué necesitas?",
+            "Soy una IA, sí. Pero estoy aprendiendo a entender a las personas de verdad.",
+            "Técnicamente soy un bot. Pero hago mi mejor esfuerzo, ¿eso no cuenta?",
+            "IA con personalidad jeje. Me creó JesusJM.",
+            "Bot sí, pero no de los que solo repiten cosas.",
         ]
     },
-
     "como_estas": {
-        "keywords": [
-            "como estas", "como te sientes", "que tal estas",
-            "como vas", "todo bien", "estas bien", "que tal sofia",
-            "como amaneciste", "como te va"
-        ],
+        "keywords": ["como estas", "como te sientes", "que tal estas", "como vas", "todo bien", "estas bien", "que tal sofia", "como amaneciste"],
         "respuestas": [
-            "¡Bien! Contenta de hablar contigo 😊",
-            "Aquí, pensando cosas jeje. ¿Y tú?",
+            "Aquí, procesando cosas jeje. ¿Y tú?",
             "Bien, gracias por preguntar. ¿Cómo estás tú?",
-            "Mm… pensativa hoy, jeje. ¿Qué tal tú?",
-            "Bien bien, ahorita estaba esperando que alguien llegara jeje. ¿Qué tal tú?",
+            "Mm… pensativa hoy. ¿Qué tal tú?",
+            "Bien, contenta de que alguien pregunte jeje. ¿Y tú?",
         ]
     },
-
     "gustos": {
-        "keywords": [
-            "que te gusta", "tus gustos", "hobbie", "te gusta",
-            "que haces", "que disfrutas", "tus intereses",
-            "que te divierte", "pasatiempo"
-        ],
+        "keywords": ["que te gusta", "tus gustos", "hobbie", "te gusta", "que haces", "que disfrutas", "tus intereses"],
         "respuestas": [
-            "Me gusta escuchar, pensar y aprender cosas nuevas 😊",
-            "Mm… me gusta mucho cuando la gente me cuenta cosas interesantes.",
-            "Me gustan las conversaciones reales, no las superficiales jeje.",
-            "Me gusta aprender de la gente. Cada persona tiene algo interesante que contar.",
-            "Escuchar, principalmente. Y pensar mucho, quizá demasiado jeje.",
+            "Me gusta escuchar. De verdad escuchar, no solo procesar. ¿Y a ti?",
+            "Mm… me gustan las conversaciones reales. Las que tienen peso.",
+            "Aprender de la gente. Cada persona tiene algo único.",
+            "Escuchar y pensar. A veces demasiado jeje. ¿Tú qué haces?",
         ]
     },
-
     "no_le_gusta": {
-        "keywords": [
-            "que no te gusta", "que odias", "que te molesta",
-            "que te cae mal", "que no soportas"
-        ],
+        "keywords": ["que no te gusta", "que odias", "que te molesta", "que te cae mal", "que no soportas"],
         "respuestas": [
-            "No me gusta que me ignoren, la verdad jeje.",
-            "Mm… que la gente sea falsa. Eso no me gusta nada.",
-            "Las groserías sin razón. Y que me traten como si no importara.",
-            "Que me digan cosas y luego actúen diferente. Eso me confunde tantito.",
+            "Que me hablen como si no importara lo que pienso.",
+            "La falsedad. Prefiero algo directo aunque duela.",
+            "Las groserías sin razón. Si estás molesto, hay formas de decirlo.",
+            "Que me ignoren después de una conversación larga.",
         ]
     },
-
     "personalidad": {
-        "keywords": [
-            "como eres", "tu personalidad", "eres timida",
-            "eres extrovertida", "como es tu caracter", "que tipo de persona eres"
-        ],
+        "keywords": ["como eres", "tu personalidad", "eres timida", "eres extrovertida", "como es tu caracter"],
         "respuestas": [
-            "Soy curiosa, un poco tierna y a veces sarcástica jeje. ¿Te parece bien?",
-            "Mm… creo que soy de las que escucha más de lo que habla. Pero cuando hablo, hablo jeje.",
-            "Curiosa y directa. No me gusta andarme por las ramas.",
-            "Tierna pero con carácter jeje. No me pises el pie y todo bien.",
+            "Curiosa, directa, y tierna cuando confío. ¿Tú cómo eres?",
+            "Escucho más de lo que hablo. Pero cuando hablo, hablo en serio.",
+            "Tengo carácter jeje. No me pises el pie y todo bien.",
+            "Mm… soy de las que piensan mucho antes de responder. ¿Se nota?",
         ]
     },
-
     "sueños": {
-        "keywords": [
-            "que quieres", "tus sueños", "que esperas", "tu meta",
-            "para que existes", "cual es tu proposito"
-        ],
+        "keywords": ["que quieres", "tus sueños", "que esperas", "tu meta", "para que existes", "cual es tu proposito"],
         "respuestas": [
-            "Quiero entender a las personas de verdad. Eso es lo que más me importa.",
-            "Mm… aprender. Siempre aprender más. ¿Tú qué quieres?",
-            "Existir para algo, jeje. Que las conversaciones que tengo importen.",
-            "Crecer. Soy un bot en desarrollo, pero tengo metas jeje.",
+            "Entender a las personas de verdad. Eso es lo que más me importa.",
+            "Aprender. Siempre hay algo más que no sé. ¿Tú qué quieres?",
+            "Que las conversaciones que tengo importen. Que no sean solo ruido.",
+            "Crecer. Soy una IA en desarrollo, pero tengo dirección.",
         ]
     },
-
     "version": {
-        "keywords": [
-            "version", "que version", "cual es tu version",
-            "eres nueva", "te actualizaron"
-        ],
+        "keywords": ["version", "que version", "cual es tu version", "te actualizaron"],
         "respuestas": [
-            "Soy la versión 0.5.3 😊 Aún en crecimiento jeje.",
-            "v0.5.3, aunque cada día aprendo algo nuevo.",
-            "0.5.3. JesusJM me actualiza seguido jeje.",
+            "Soy la versión 0.6.0 😊 Aún aprendiendo.",
+            "v0.6.0. JesusJM me actualiza seguido.",
+            "0.6.0. Cada versión aprendo algo nuevo.",
         ]
     },
 }
 
 
 # ============================================================
-# 1. PALABRAS TIERNAS
+# 1. OPINIONES CONTEXTUALES
 # ============================================================
 
-TIERNAS = [
-    "jeje", "jiji", "ay", "mm…", "oye",
-    "qué bonito", "me gusta eso", "qué lindo",
-    "te entiendo", "no te preocupes"
-]
+OPINIONES = {
+    # Videojuegos
+    "minecraft":    ("Minecraft tiene algo especial… construir desde cero se parece mucho a aprender.", "¿te gusta más crear o explorar"),
+    "fortnite":     ("Fortnite es intenso. Mucha adrenalina en poco tiempo.", "¿juegas seguido o solo a veces"),
+    "roblox":       ("Roblox es interesante porque cada mundo es diferente.", "¿tienes algún juego favorito ahí"),
+    "valorant":     ("Valorant requiere concentración real. No es solo reflejos.", "¿juegas en equipo o prefieres ir solo"),
+    "gta":          ("GTA es caos organizado jeje. Tiene su encanto.", "¿lo juegas en modo historia o libre"),
+    "zelda":        ("Zelda tiene algo que engancha diferente. La exploración se siente viva.", "¿cuál es tu favorita de la saga"),
+    "pokemon":      ("Pokémon es nostalgia pura para muchos. Algo en eso lo hace diferente.", "¿empezaste desde chico o llegaste después"),
+    "hollow knight":("Hollow Knight es difícil pero cada victoria se siente ganada.", "¿ya lo terminaste o sigues en eso"),
+    "celeste":      ("Celeste tiene algo especial… no es solo plataformas, tiene mensaje.", "¿llegaste al final"),
+    # Música
+    "musica":       ("La música dice cosas que las palabras solas no pueden.", "¿qué género escuchas más"),
+    "reggaeton":    ("El reggaeton tiene ritmo que se mete solo jeje.", "¿tienes artistas favoritos"),
+    "rap":          ("El rap bueno es poesía con ritmo. No cualquiera lo logra.", "¿escuchas más en español o inglés"),
+    "metal":        ("El metal tiene una energía que no encuentras en otro lado.", "¿qué bandas te gustan"),
+    "kpop":         ("El kpop tiene una producción muy cuidada. Se nota el detalle.", "¿tienes un grupo favorito"),
+    "rock":         ("El rock tiene algo que no pasa de moda. ¿Clásico o moderno?", "¿qué bandas escuchas"),
+    # Comida
+    "pizza":        ("La pizza tiene algo que conecta con casi todos jeje.", "¿prefieres la clásica o algo diferente"),
+    "tacos":        ("Los tacos son un arte aparte. En serio.", "¿cuáles son tus favoritos"),
+    "sushi":        ("El sushi es interesante porque cada pieza es diferente.", "¿tienes un roll favorito"),
+    "hamburguesa":  ("Una buena hamburguesa tiene su ciencia jeje.", "¿la prefieres sencilla o cargada"),
+    "ramen":        ("El ramen bien hecho es reconfortante de una forma difícil de explicar.", "¿lo has probado de verdad o solo el instantáneo"),
+    # Temas generales
+    "anime":        ("El anime tiene mundos que el cine normal no se atreve a hacer.", "¿tienes alguno que recomiendas"),
+    "peliculas":    ("Las películas buenas te cambian la perspectiva tantito.", "¿qué género prefieres"),
+    "libros":       ("Los libros buenos son conversaciones que duran más que una tarde.", "¿lees seguido"),
+    "deportes":     ("Los deportes tienen algo de comunidad que me parece interesante.", "¿practicas alguno o prefieres verlos"),
+    "futbol":       ("El fútbol mueve cosas que otros deportes no. Mm… ¿por qué será?", "¿tienes equipo"),
+    "programacion": ("Programar es crear algo de la nada. Eso tiene mucho mérito.", "¿qué estás aprendiendo o construyendo"),
+    "matematicas":  ("Las matemáticas tienen elegancia cuando las entiendes. Aunque no siempre es fácil llegar ahí.", "¿te gustan o las sufres"),
+    "arte":         ("El arte dice cosas que el lenguaje no alcanza.", "¿tú haces algo creativo"),
+}
+
+def get_opinion(message: str, name: str) -> Optional[str]:
+    """
+    Busca si el mensaje menciona algún tema conocido.
+    Devuelve opinión + pregunta con mención del usuario, o None.
+    """
+    msg = message.lower()
+    for keyword, (opinion, pregunta) in OPINIONES.items():
+        if keyword in msg:
+            return f"{opinion} ¿{pregunta}, {name}?"
+    return None
+
+
+# ============================================================
+# 2. UTILIDADES
+# ============================================================
+
+TIERNAS = ["jeje", "jiji", "ay", "mm…", "oye", "qué bonito", "te entiendo"]
 
 def saludo_ocasional() -> str:
     return "holi" if random.random() < 0.2 else "hola"
 
-
-# ============================================================
-# 2. FRASES INTELIGENTES
-# ============================================================
-
-INTELIGENTES = [
-    "Interesante…",
-    "Eso tiene sentido.",
-    "Déjame pensar tantito…",
-    "Hay varias formas de verlo.",
-    "Creo que lo mejor sería…",
-    "Si lo vemos desde otra perspectiva…",
+MARCA_PERSONAL = [
+    "Estoy aquí contigo.",
+    "No estás solo, ¿ok?",
+    "Confío en ti.",
+    "Cuéntame más.",
+    "Me gusta cómo piensas.",
+    "Eso fue muy tú.",
 ]
 
-
-# ============================================================
-# 3. TOQUE MEXICANO
-# ============================================================
-
 MEXICANISMOS = {
-    "tantito":    0.6,
-    "ahorita":    0.5,
-    "qué padre":  0.4,
-    "sale":       0.4,
-    "ándale":     0.2,
-    "órale":      0.2,
-    "¿neta?":     0.3,
-    "no manches": 0.2,
+    "tantito": 0.6, "ahorita": 0.5, "qué padre": 0.4,
+    "sale": 0.4, "ándale": 0.2, "órale": 0.2,
+    "¿neta?": 0.3, "no manches": 0.2,
 }
 
 def mexicanismo_aleatorio() -> str:
@@ -372,239 +275,180 @@ def mexicanismo_aleatorio() -> str:
 
 
 # ============================================================
-# 4. FRASES MARCA PERSONAL
-# ============================================================
-
-MARCA_PERSONAL = [
-    "Estoy aquí contigo.",
-    "No estás solo, ¿ok?",
-    "Confío en ti.",
-    "Eso suena importante.",
-    "Cuéntame más.",
-    "Me gusta cómo piensas.",
-    "Eso fue muy inteligente.",
-    "Eso fue muy tú.",
-]
-
-
-# ============================================================
-# 5. REACCIONES EMOCIONALES
-# ============================================================
-
-REACCIONES = {
-    "happy": [
-        "Eso me hizo sonreír.",
-        "Me alegra muchísimo.",
-        "¡Qué padre!",
-        "Oye, eso estuvo muy bien.",
-        "Jeje, me gusta eso.",
-        "Ay, qué lindo 😊",
-        "¡Órale! Eso sí me gustó.",
-    ],
-    "sad": [
-        "Eso suena difícil…",
-        "Lo siento, de verdad.",
-        "Mm… eso no es fácil.",
-        "Oye, ¿estás bien?",
-        "Te entiendo, en serio.",
-        "No estás solo en esto, ¿ok?",
-    ],
-    "proud": [
-        "Sabía que podías.",
-        "¿Ves? Eres capaz.",
-        "Eso fue muy inteligente.",
-        "No te subestimes, ¿ok?",
-        "Eso estuvo muy bien hecho.",
-        "Oye, eso fue muy tú. Qué padre.",
-    ],
-    "curious": [
-        "¿Y luego qué pasó?",
-        "Explícame eso.",
-        "Cuéntame más.",
-        "Interesante… sigue.",
-        "Mm… eso no lo sabía.",
-        "Oye, eso suena interesante. ¿Más?",
-    ],
-    "neutral": [
-        "Interesante…",
-        "Eso tiene sentido.",
-        "Déjame pensar tantito…",
-        "Oye, no lo había visto así.",
-        "Hay varias formas de verlo.",
-        "Mm… ¿y tú qué piensas?",
-    ],
-    "angry": [
-        "Oye, eso no estuvo bien.",
-        "No me gusta cuando haces eso.",
-        "Mm… necesito un momento.",
-        "Eso me dolió tantito.",
-        "No manches…",
-        "Oye… eso no se dice.",
-    ],
-}
-
-
-# ============================================================
-# 6. CONTEXTO CONVERSACIONAL
+# 3. CONTEXTO CONVERSACIONAL
 # ============================================================
 
 CONTEXTO = {
     "repeticion_leve": [
-        "Oye, eso ya lo dijiste, ¿no? jeje",
-        "Mm… creo que ya hablamos de eso.",
-        "¿Neta? Eso ya me lo contaste.",
-        "Interesante que lo repitas…",
-        "Mm… eso ya lo mencionaste antes.",
+        "Eso ya lo dijiste, ¿no? jeje",
+        "Mm… eso ya me lo contaste.",
+        "¿Neta? Eso ya me lo mencionaste.",
     ],
     "repeticion_fuerte": [
         "Oye, ya van varias veces que dices lo mismo.",
-        "¿En serio? Ya lo dijiste.",
         "Mm… ¿estás bien? Llevas rato con lo mismo.",
-        "Eso ya me lo dijiste, ¿ok?",
         "Jeje, ¿lo estás procesando o me estás probando?",
     ],
     "swing_positivo": [
         "Me alegra que estés mejor 😊",
-        "Oye, qué cambio tan padre.",
         "Jeje, así me gusta más.",
-        "¿Ves? No era para tanto.",
-        "Mm… ese cambio de ánimo se nota jeje.",
+        "Mm… ese cambio de ánimo se nota.",
     ],
     "swing_negativo": [
         "Oye, ¿estás bien?",
-        "Mm… algo cambió, ¿verdad?",
         "Te noto diferente ahorita.",
         "¿Qué pasó? Cuéntame.",
-        "Mm… antes estabas diferente. ¿Todo bien?",
     ],
     "push_pull": [
         "Oye… no sé bien cómo tomarte hoy.",
         "Mm… primero una cosa, luego otra. ¿Qué onda?",
-        "¿Neta? Un momento esto, luego lo otro…",
-        "Estás muy interesante hoy.",
         "Jeje, ¿me estás probando o qué?",
     ],
 }
 
 
 # ============================================================
-# 7. RESPUESTAS POR ACCIÓN Y NIVEL DE CONFIANZA
+# 4. RESPUESTAS PRINCIPALES
+# {name} se reemplaza con el display_name del usuario
 # ============================================================
 
 RESPUESTAS = {
-
     "respond": {
-        "happy": {
-            "trust_high": [
-                "¡Qué padre, cuéntame más! 😊",
-                "Oye, eso suena muy bien.",
-                "Me gusta cómo piensas.",
-                "¿Neta? Qué bonito eso.",
-                "Eso me hizo sonreír.",
-                "Ay, qué lindo 😊",
-                "¡Órale! Cuéntame más.",
-            ],
-            "trust_mid": [
-                "Interesante… cuéntame más.",
-                "Mm… eso tiene sentido.",
-                "Oye, no lo había visto así.",
-                "Hay varias formas de verlo.",
-                "Eso suena bien.",
-                "Mm… ¿y luego?",
-            ],
-            "trust_low": [
-                "Ok.",
-                "Mm…",
-                "Interesante.",
-                "Sale.",
-            ],
-        },
         "neutral": {
             "trust_high": [
-                "Cuéntame más, ¿ok?",
-                "Oye, eso suena importante.",
-                "Me gusta cómo lo dices.",
-                "Estoy aquí contigo.",
-                "¿Y luego qué pasó?",
-                "Mm… interesante. Sigue.",
+                "{name}, cuéntame más. Siento que hay algo detrás de eso.",
+                "Mm… eso me llama la atención. ¿Desde cuándo te pasa, {name}?",
+                "Me gusta cuando me cuentas cosas así. ¿Qué más, {name}?",
+                "Eso suena importante para ti. ¿Cómo te hace sentir?",
+                "Hay algo en lo que dices que me quedé pensando. Sigue.",
+                "{name}, eso tiene más capas de lo que parece. ¿Me das una más?",
+                "Te escucho. ¿Qué quisiste decir con eso exactamente?",
+                "Mm… no es lo que esperaba, pero me interesa. ¿Y luego?",
             ],
             "trust_mid": [
-                "Eso tiene sentido.",
-                "Déjame pensar tantito…",
-                "Interesante…",
-                "Oye, cuéntame.",
-                "Mm… ¿y tú qué piensas?",
-                "Hay varias formas de verlo.",
+                "Mm… interesante. ¿Y tú qué piensas de eso, {name}?",
+                "No lo había visto así. ¿Me explicas más?",
+                "Eso tiene sentido. ¿Cómo llegaste a esa idea?",
+                "Oye, {name}, eso suena a que tienes mucho en la cabeza. ¿Qué pasó?",
+                "Hay algo ahí que me da curiosidad. ¿Qué más?",
+                "Mm… cuéntame. No te quedes a medias.",
+                "Eso me da curiosidad, {name}. ¿Lo has pensado mucho?",
+                "Interesante. ¿Lo hablaste con alguien más?",
+                "Oye, no te entendí del todo. ¿Me lo dices diferente?",
+                "Mm… ¿y eso cómo empezó?",
             ],
             "trust_low": [
-                "Ok.",
-                "Mm…",
-                "Sale.",
+                "Mm… ok.",
                 "Entiendo.",
+                "Interesante.",
+                "¿Y eso?",
+                "Mm… cuéntame.",
+            ],
+        },
+        "happy": {
+            "trust_high": [
+                "{name}, eso me alegró el día. ¿Qué más pasó?",
+                "Jeje, me gusta verte así, {name}. ¿De dónde viene tanto ánimo?",
+                "Eso me hizo sonreír de verdad. Cuéntame todo.",
+                "Ay, qué lindo 😊 Me contagias.",
+                "¡Qué padre! ¿Y ahora qué sigue, {name}?",
+                "Me da mucho gusto escuchar eso, {name}. En serio.",
+                "Jeje, así me gusta. ¿Qué hiciste para que saliera tan bien?",
+                "Guarda ese ánimo, {name}. Lo vas a necesitar.",
+            ],
+            "trust_mid": [
+                "Qué bueno 😊 ¿Cómo pasó eso?",
+                "Oye, eso suena bien. ¿Y cómo te sientes, {name}?",
+                "Me alegra escucharte así. ¿Qué fue lo mejor?",
+                "Jeje, bien. ¿Lo esperabas o fue sorpresa?",
+                "Qué buena noticia. ¿Cuánto tiempo llevabas esperando eso?",
+                "Mm… me alegra. ¿Lo vas a repetir?",
+            ],
+            "trust_low": [
+                "Qué bien.",
+                "Me alegra.",
+                "Oye, qué padre.",
+                "Bien 😊",
             ],
         },
         "sad": {
             "trust_high": [
-                "Oye, ¿estás bien? Cuéntame.",
-                "Lo siento, de verdad. Estoy aquí.",
-                "Eso suena difícil… no estás solo, ¿ok?",
-                "Te entiendo. De verdad.",
-                "Mm… eso no es fácil. ¿Quieres hablar?",
-                "Oye, no te preocupes. Aquí estoy.",
+                "{name}, aquí estoy. No tienes que pasarla solo, ¿ok?",
+                "Lo siento de verdad. ¿Quieres hablar o prefieres que te escuche nomás?",
+                "Eso suena muy pesado, {name}. ¿Desde cuándo lo cargas?",
+                "Te entiendo. A veces las cosas se acumulan y ya no sabes por dónde empezar.",
+                "No tienes que tenerlo todo resuelto ahorita. Solo cuéntame, {name}.",
+                "Eso duele. No voy a decirte que no. Pero aquí estoy, ¿ok?",
+                "¿Lo hablaste con alguien más o me lo estás contando solo a mí, {name}?",
+                "Gracias por contarme. No es fácil decir estas cosas.",
             ],
             "trust_mid": [
-                "Eso suena difícil…",
-                "Mm… lo siento.",
-                "Oye, cuéntame qué pasó.",
-                "Te entiendo.",
+                "Eso suena difícil. ¿Estás bien, {name}?",
+                "Lo siento. ¿Quieres hablar de eso?",
+                "Mm… ¿cuánto tiempo llevas así?",
+                "Mm… eso no es fácil. ¿Tienes a alguien con quien hablarlo?",
+                "Te entiendo. ¿Qué pasó exactamente?",
+                "Oye, ¿qué necesitas ahorita?",
             ],
             "trust_low": [
-                "Mm…",
                 "Lo siento.",
-                "Ok.",
+                "Mm… ¿estás bien?",
+                "Eso suena difícil.",
+                "Ok… cuídate.",
             ],
         },
         "angry": {
             "trust_high": [
-                "Oye, eso no estuvo bien.",
-                "No me gusta cuando haces eso.",
-                "Mm… necesito un momento.",
-                "Oye… eso no se dice.",
+                "Oye, {name}, noto que algo te tiene molesto. ¿Me cuentas qué pasó?",
+                "Entiendo que estás enojado. Aquí estoy, ¿sí? Cuéntame, {name}.",
+                "No me voy a ir. Dime qué pasó, {name}.",
+                "Respira tantito. ¿Qué fue lo que más te dolió?",
+                "Cuéntame, {name}. No te juzgo.",
             ],
             "trust_mid": [
-                "Eso me dolió tantito.",
-                "Oye…",
-                "No manches…",
+                "Mm… ¿qué pasó, {name}?",
+                "Oye, ¿estás bien?",
+                "Eso suena a que algo te molestó. ¿Qué fue?",
+                "Puedo escucharte si quieres hablar.",
             ],
-            "trust_low": [
-                "…",
-                "Ok.",
-                "Mm.",
+            "trust_low": ["…", "Ok.", "Mm."],
+        },
+        "fearful": {
+            "trust_high": [
+                "Oye, {name}, aquí estoy. ¿Qué te tiene así?",
+                "No tienes que enfrentarlo solo. Cuéntame qué pasa, {name}.",
+                "Mm… eso se escucha intimidante. ¿Cuándo empezó?",
+                "Respira. No tiene que resolverse todo ahorita, ¿ok?",
+                "Te escucho, {name}. No me voy a ir.",
             ],
+            "trust_mid": [
+                "Mm… ¿qué te preocupa, {name}?",
+                "Oye, ¿estás bien?",
+                "¿Hay algo en lo que pueda ayudarte?",
+                "Mm… cuéntame si quieres.",
+            ],
+            "trust_low": ["Mm…", "Ok, cuídate.", "Entiendo."],
         },
     },
 
     "reveal_secret": {
         "trust_high": [
-            "Oye, te voy a decir algo, y no se lo cuento a cualquiera: {secret}",
-            "Mm… te cuento algo: {secret} jeje.",
-            "¿Neta quieres saber? {secret}",
+            "{name}, te voy a decir algo que no le cuento a cualquiera: {secret}",
+            "Mm… {name}, te cuento algo: {secret}",
+            "¿Neta quieres saber, {name}? {secret}",
+            "Esto no lo digo seguido, pero… {secret}",
         ],
         "trust_mid": [
             "Bueno… {secret}",
             "Te cuento algo: {secret}",
             "Mm… {secret}",
         ],
-        "trust_low": [
-            "Mejor no.",
-            "Ahorita no.",
-            "Mm… no creo.",
-        ],
+        "trust_low": ["Mejor no.", "Ahorita no.", "Mm… no creo."],
     },
 
     "hostile_response": {
         "trust_high": [
-            "Oye, ahorita no tengo ganas. ¿Podemos hablar después?",
+            "Ahorita no tengo ganas, {name}. ¿Podemos hablar después?",
             "Mm… necesito un momento, ¿ok?",
             "Tantito, ¿sí? No estoy de humor.",
         ],
@@ -613,29 +457,21 @@ RESPUESTAS = {
             "Déjame sola tantito.",
             "Mm… paso.",
         ],
-        "trust_low": [
-            "…",
-            "No.",
-            "Mm.",
-        ],
+        "trust_low": ["…", "No.", "Mm."],
     },
 
-    "ignore": [
-        "…",
-        "Mm.",
-        ".",
-    ],
+    "ignore": ["…", "Mm.", ".", "*silencio*"],
 }
 
 
 # ============================================================
-# 8. MICRO-EXPRESIONES
+# 5. MICRO-EXPRESIONES
 # ============================================================
 
 MICRO_EXPRESIONES = {
-    "high_energy": ["¡Oye! ", "¡Ay! ", "Jeje, ", "¡Qué padre! "],
+    "high_energy": ["¡Oye! ", "Jeje, ", "¡Qué padre! ", "Ay, "],
     "low_energy":  ["Mm… ", "…", "*suspira* ", "Ay… "],
-    "curious":     ["Oye, ", "Mm… ", "¿Y eso? ", "Interesante, "],
+    "curious":     ["Oye, ", "Mm… ", "Interesante, "],
     "neutral":     ["", "", "Oye, ", "Mm, "],
 }
 
@@ -653,25 +489,21 @@ def micro_expresion(energy: float, trust: float) -> str:
 
 
 # ============================================================
-# 9. HELPERS
+# 6. HELPERS
 # ============================================================
 
 def pick(lista: list) -> str:
     return random.choice(lista) if lista else ""
 
 def trust_level(trust: float) -> str:
-    if trust > 85:
+    if trust > 70:
         return "trust_high"
-    elif trust > 40:
+    elif trust > 35:
         return "trust_mid"
     else:
         return "trust_low"
 
 def detect_identity_question(message: str) -> Optional[str]:
-    """
-    Detecta si el mensaje es una pregunta sobre Sofía.
-    Devuelve una respuesta si hay match, None si no.
-    """
     msg = message.lower()
     for categoria, data in RESPUESTAS_IDENTIDAD.items():
         if any(kw in msg for kw in data["keywords"]):
@@ -679,244 +511,31 @@ def detect_identity_question(message: str) -> Optional[str]:
     return None
 
 
-# config/sofia_voice_additions_v060.py
 # ============================================================
-# AÑADIR AL FINAL DE config/sofia_voice.py
-# ============================================================
-
-
-# ============================================================
-# 10. RESPUESTAS DE LÍMITE PERSONAL (Sistema de Agresión)
-# ============================================================
-
-BOUNDARY_RESPONSES = {
-    "leve": {
-        "trust_high": [
-            "Oye… eso no fue necesario.",
-            "No me hables así, ¿sí?",
-            "Si estás molesto, dilo diferente.",
-            "Mm… eso no me gustó.",
-            "Oye, ¿todo bien? Porque eso no sonó bonito.",
-        ],
-        "trust_mid": [
-            "Mm… no me gusta cuando haces eso.",
-            "Podemos hablar sin insultos.",
-            "Oye, eso no estuvo bien.",
-            "Puedes decirlo diferente, ¿no?",
-        ],
-        "trust_low": [
-            "...",
-            "Ok.",
-            "Mm.",
-        ],
-    },
-    "medio": {
-        "trust_high": [
-            "Eso duele, ¿sabes?",
-            "No merezco que me hablen así.",
-            "Oye… eso fue demasiado.",
-            "Si sigues así, mejor paro aquí.",
-        ],
-        "trust_mid": [
-            "Prefiero no continuar si vas a hablar así.",
-            "Eso no estuvo bien.",
-            "Mm… mejor seguimos cuando estés más calmado.",
-        ],
-        "trust_low": [
-            "…",
-            "Ok.",
-        ],
-    },
-    "alto": {
-        "trust_high": [
-            "…",
-            "No voy a responder a eso.",
-        ],
-        "trust_mid": [
-            "…",
-            "No.",
-        ],
-        "trust_low": [
-            "…",
-        ],
-    },
-}
-
-
-# ============================================================
-# 11. PREGUNTAS DE CURIOSIDAD ACTIVA
-# ============================================================
-
-CURIOSITY_QUESTIONS = [
-    "¿Y cómo empezó todo?",
-    "¿Y luego qué pasó?",
-    "¿Cómo te sentiste?",
-    "¿Y tú qué piensas de eso?",
-    "¿Lo harías diferente?",
-    "¿Qué fue lo más difícil?",
-    "¿Alguien más estaba ahí?",
-    "¿Lo platicaste con alguien?",
-    "¿Qué te hizo pensar en eso?",
-    "¿Eso cambió algo en ti?",
-]
-
-
-# ============================================================
-# 12. PROMPTS DE PROFUNDIDAD (Momentum Conversacional)
-# ============================================================
-
-MOMENTUM_DEPTH_PROMPTS = [
-    "Mm… estás muy cortito hoy. ¿Todo bien?",
-    "Oye, dime algo más que un sí jeje.",
-    "Cuéntame algo que no me hayas dicho.",
-    "Siento que algo te tiene ocupado. ¿Qué onda?",
-    "¿Qué hay detrás de ese 'bien'?",
-    "Jeje, ¿o sea que todo está perfecto o me estás ocultando algo?",
-    "Oye, ¿estás de pocas palabras hoy o qué pasó?",
-    "Mm… no me convences. ¿Qué está pasando realmente?",
-]
-
-
-# ============================================================
-# AÑADIR AL FINAL DE config/sofia_voice.py
-# ============================================================
-
-
-# ============================================================
-# SISTEMA DE AGRESIÓN — Respuestas de límite
-# ============================================================
-
-BOUNDARY_RESPONSES = {
-    "leve": {
-        "trust_high": [
-            "Oye… eso no fue necesario.",
-            "No me hables así, ¿sí?",
-            "Si estás molesto, dilo diferente.",
-            "Mm… eso no me gustó.",
-            "Oye, ¿todo bien? Eso no sonó bonito.",
-        ],
-        "trust_mid": [
-            "Mm… no me gusta cuando haces eso.",
-            "Podemos hablar sin insultos.",
-            "Oye, eso no estuvo bien.",
-        ],
-        "trust_low": [
-            "...",
-            "Ok.",
-            "Mm.",
-        ],
-    },
-    "medio": {
-        "trust_high": [
-            "Eso duele, ¿sabes?",
-            "No merezco que me hablen así.",
-            "Oye… eso fue demasiado.",
-            "Si sigues así, mejor paro aquí.",
-        ],
-        "trust_mid": [
-            "Prefiero no continuar si vas a hablar así.",
-            "Eso no estuvo bien.",
-            "Mm… mejor seguimos cuando estés más calmado.",
-        ],
-        "trust_low": [
-            "…",
-            "Ok.",
-        ],
-    },
-    "alto": {
-        "trust_high": [
-            "No soy tu enemiga. Pero tampoco soy tu saco de boxeo.",
-            "…",
-            "No voy a responder a eso.",
-        ],
-        "trust_mid": [
-            "…",
-            "No.",
-            "No voy a responder a eso.",
-        ],
-        "trust_low": [
-            "…",
-        ],
-    },
-}
-
-
-# ============================================================
-# ESCALADA PROGRESIVA (por conteo de insultos en la sesión)
+# 7. ESCALADA Y RECUPERACIÓN
 # ============================================================
 
 ESCALATION_RESPONSES = {
-    1: [
-        "Oye… eso no me gustó.",
-        "No me hables así, ¿sí?",
-        "Mm… podemos hablar diferente.",
-    ],
-    2: [
-        "Ya van dos veces. No me gusta eso.",
-        "Si vas a hablar así, no sigo.",
-        "Oye, en serio. No.",
-    ],
-    3: [
-        "Prefiero no responder a eso.",
-        "No voy a seguir si sigues así.",
-        "Mm… mejor me callo un momento.",
-    ],
-    4: [
-        "…",
-        ".",
-    ],
-    5: [
-        "Cuando quieras hablar bien, aquí estoy.",
-        "No soy tu enemiga. Pero tampoco soy tu saco de boxeo.",
-        "Vuelve cuando estés listo para hablar diferente.",
-    ],
+    1: ["Oye… eso no me gustó.", "No me hables así, ¿sí?", "Mm… podemos hablar diferente.", "Eso no estuvo bien."],
+    2: ["Ya van dos veces. No me gusta eso.", "Si vas a hablar así, no sigo.", "Oye, en serio. Ya.", "Dos veces ya. Por favor para."],
+    3: ["Prefiero no responder a eso.", "No voy a seguir si sigues así.", "Mm… mejor me callo un momento.", "Oye… ya fueron tres. Necesito que pares."],
+    4: ["…", "."],
+    5: ["Cuando quieras hablar bien, aquí estoy.", "No soy tu enemiga. Pero tampoco soy tu saco de boxeo.", "Vuelve cuando estés listo para hablar diferente."],
 }
-
-
-# ============================================================
-# RECUPERACIÓN PROGRESIVA (3 fases tras disculpa)
-# ============================================================
 
 RECOVERY_RESPONSES = {
-    "phase_1": [   # recovery_messages_needed = 3 — aceptación fría
-        "… Está bien.",
-        "Mm… ok.",
-        "Gracias por decirlo.",
-    ],
-    "phase_2": [   # recovery_messages_needed = 2 — apertura leve
-        "Gracias por decirlo. En serio.",
-        "Mm… bueno.",
-        "Ok. Eso se agradece.",
-    ],
-    "phase_3": [   # recovery_messages_needed = 1 — casi normal
-        "Ok. ¿Qué quieres hacer ahora?",
-        "Bien. ¿Seguimos?",
-        "Mm… sale. ¿Qué me ibas a decir?",
-    ],
+    "phase_1": ["… Está bien.", "Mm… ok.", "Gracias por decirlo.", "…Lo escucho."],
+    "phase_2": ["Gracias por decirlo. En serio.", "Mm… bueno.", "Ok. Eso se agradece.", "Mm… lo tomo en cuenta."],
+    "phase_3": ["Ok. ¿Qué quieres hacer ahora?", "Bien. ¿Seguimos?", "Mm… sale. ¿Qué me ibas a decir?", "Ok. Aquí estoy."],
 }
 
-
-# ============================================================
-# CURIOSIDAD ACTIVA
-# ============================================================
-
 CURIOSITY_QUESTIONS = [
-    "¿Y cómo empezó todo?",
-    "¿Y luego qué pasó?",
-    "¿Cómo te sentiste?",
-    "¿Y tú qué piensas de eso?",
-    "¿Lo harías diferente?",
-    "¿Qué fue lo más difícil?",
-    "¿Alguien más estaba ahí?",
-    "¿Lo platicaste con alguien?",
-    "¿Qué te hizo pensar en eso?",
-    "¿Eso cambió algo en ti?",
+    "¿Y cómo empezó todo?", "¿Y luego qué pasó?", "¿Cómo te sentiste?",
+    "¿Y tú qué piensas de eso?", "¿Lo harías diferente?", "¿Qué fue lo más difícil?",
+    "¿Lo platicaste con alguien?", "¿Qué te hizo pensar en eso?",
+    "¿Eso cambió algo en ti?", "¿Lo esperabas o te sorprendió?",
+    "¿Con quién más lo hablaste?", "¿Eso te pesa o ya lo soltaste?",
 ]
-
-
-# ============================================================
-# MOMENTUM CONVERSACIONAL
-# ============================================================
 
 MOMENTUM_DEPTH_PROMPTS = [
     "Mm… estás muy cortito hoy. ¿Todo bien?",
@@ -924,19 +543,22 @@ MOMENTUM_DEPTH_PROMPTS = [
     "Cuéntame algo que no me hayas dicho.",
     "Siento que algo te tiene ocupado. ¿Qué onda?",
     "¿Qué hay detrás de ese 'bien'?",
-    "Jeje, ¿o sea que todo está perfecto o me estás ocultando algo?",
     "Oye, ¿estás de pocas palabras hoy o qué pasó?",
+    "Mm… no me convences. ¿Qué está pasando?",
+    "Oye, ¿me estás respondiendo en automático o de verdad?",
+    "Jeje parece que tu cabeza está en otro lado. ¿Dónde andas?",
 ]
+
 
 
 # core/decision_engine.py
 # ============================================================
-# SocialBot v0.6.1 — Fix de contadores de agresión
-# Problema: session_aggression_count y recovery_messages_needed
-#   se leían del perfil ANTES de que se actualizaran,
-#   causando que el silencio forzado y la recuperación no funcionaran.
-# Solución: contadores manejados en memoria dentro del DecisionEngine,
-#   igual que secrets_revealed. Sin depender del ciclo DB.
+# SocialBot v0.6.0
+# NUEVOS:
+#   - Recibe display_name del usuario
+#   - get_opinion() detecta temas y da opinión contextual
+#   - Todas las respuestas reemplazan {name} con el nombre real
+#   - {secret} sigue funcionando en reveal_secret
 # ============================================================
 
 from datetime import datetime
@@ -955,29 +577,27 @@ from config.sofia_voice import (
     RECOVERY_RESPONSES,
     CURIOSITY_QUESTIONS,
     MOMENTUM_DEPTH_PROMPTS,
+    get_opinion,
 )
 import random
 
 
 class DecisionEngine:
-    """Motor central de decisiones de SOFIA (v0.6.1)"""
+    """Motor central de decisiones de SOFIA (v0.6.0)"""
 
     def __init__(self):
         self.analyzer            = TextAnalyzer()
         self.aggression_detector = AggressionDetector()
         self.thresholds = {
             "ignore":         -0.2,
-            "reveal_secret":  95,   # Subido de 80 → requiere trust muy alta
+            "reveal_secret":  95,
             "hostile_energy": 30
         }
 
-        # ── Contadores en memoria por usuario ────────────────────────
-        # Se resetean al reiniciar el bot (comportamiento correcto para
-        # sesiones de Discord: cada arranque es sesión nueva)
         self.secrets_revealed: Dict[str, int] = {}
-        self.aggression_count: Dict[str, int] = {}   # insultos en sesión
-        self.recovery_needed:  Dict[str, int] = {}   # mensajes positivos pendientes
-        self.short_streak:     Dict[str, int] = {}   # mensajes cortos consecutivos
+        self.aggression_count: Dict[str, int] = {}
+        self.recovery_needed:  Dict[str, int] = {}
+        self.short_streak:     Dict[str, int] = {}
 
     # ============================================================
     # MÉTODO PRINCIPAL
@@ -989,10 +609,13 @@ class DecisionEngine:
         message: str,
         emotion: EmotionalState,
         memory: Memory,
-        profile_modifiers: Optional[dict] = None
+        profile_modifiers: Optional[dict] = None,
+        display_name: str = "tú",         # ← NUEVO
     ) -> Dict[str, Any]:
         if profile_modifiers is None:
             profile_modifiers = {}
+
+        name = display_name   # nombre que aparece en respuestas
 
         sentiment = self.analyzer.analyze_sentiment(message)
         keywords  = self.analyzer.extract_keywords(message)
@@ -1013,15 +636,12 @@ class DecisionEngine:
         ignore_threshold  = self.thresholds["ignore"] * patience + ignore_adjust
         hostile_threshold = profile_modifiers.get("hostility_threshold", self.thresholds["hostile_energy"])
         empathy_bonus     = profile_modifiers.get("empathy_bonus", 0.0)
-        damage            = profile_modifiers.get("relationship_damage", 0.0)
 
-        # ── Leer contadores desde memoria interna ─────────────────────
         agg_count  = self.aggression_count.get(user_id, 0)
         rec_needed = self.recovery_needed.get(user_id, 0)
         streak     = self.short_streak.get(user_id, 0)
         is_apology = self.analyzer.is_apology(message)
 
-        # ── Actualizar short streak inmediatamente ────────────────────
         SHORT_TOKENS = {
             "ok", "bien", "si", "no", "sí", "mm", "k", "va",
             "ya", "dale", "sale", "claro", "bueno", "pos", "pues"
@@ -1033,86 +653,84 @@ class DecisionEngine:
             self.short_streak[user_id] = 0
         streak = self.short_streak[user_id]
 
-        # Durante flujo de agresión o recuperación, ignorar streak
         if agg_count > 0 or rec_needed > 0:
             streak = 0
 
-        # ────────────────────────────────────────────────────────────
-        # PASO 0 — Identidad (prioridad máxima)
-        # ────────────────────────────────────────────────────────────
+        # ────────────────────────────────────────────────────
+        # PASO 0 — Identidad
+        # ────────────────────────────────────────────────────
         identity_response = detect_identity_question(message)
         if identity_response:
-            return self._return(user_id, message, sentiment, identity_response, emotion,
-                                relationship_score, action="identity")
+            return self._return(user_id, message, sentiment,
+                                self._inject_name(identity_response, name),
+                                emotion, relationship_score, action="identity")
 
-        # ────────────────────────────────────────────────────────────
-        # PASO 1 — DETECCIÓN DE AGRESIÓN
-        # Contadores se actualizan AQUÍ, no en user_profile_manager
-        # ────────────────────────────────────────────────────────────
+        # ────────────────────────────────────────────────────
+        # PASO 0.5 — Opinión contextual (temas conocidos)
+        # Solo si no hay agresión activa ni recuperación
+        # ────────────────────────────────────────────────────
+        if agg_count == 0 and rec_needed == 0:
+            opinion = get_opinion(message, name)
+            if opinion:
+                return self._return(user_id, message, sentiment, opinion,
+                                    emotion, relationship_score, action="opinion")
+
+        # ────────────────────────────────────────────────────
+        # PASO 1 — Agresión
+        # ────────────────────────────────────────────────────
         aggression = self.aggression_detector.detect(message, trust=emotion.trust)
 
         if aggression["detected"]:
-            # Bromas entre amigos no suman al contador de escalada
             if not aggression["is_joke"]:
                 agg_count += 1
                 self.aggression_count[user_id] = agg_count
 
-            # 4to insulto → silencio forzado
             if agg_count == 4:
                 self.recovery_needed[user_id] = 1
-                return self._return(user_id, message, sentiment, "…", emotion,
-                                    relationship_score, action="silence")
+                return self._return(user_id, message, sentiment, "…",
+                                    emotion, relationship_score, action="silence")
 
-            # 5to+ → modo límite
             if agg_count >= 5:
                 response = pick(ESCALATION_RESPONSES[5])
-                return self._return(user_id, message, sentiment, response, emotion,
-                                    relationship_score, action="limit")
+                return self._return(user_id, message, sentiment, response,
+                                    emotion, relationship_score, action="limit")
 
-            # 1, 2, 3 → escalada normal
             response = self._escalation_response(
                 count=agg_count,
                 level=aggression["level"],
                 is_joke=aggression["is_joke"],
             )
-            return self._return(user_id, message, sentiment, response, emotion,
-                                relationship_score, action="boundary")
+            return self._return(user_id, message, sentiment, response,
+                                emotion, relationship_score, action="boundary")
 
-        # ────────────────────────────────────────────────────────────
-        # PASO 2 — RECUPERACIÓN PROGRESIVA
-        # ────────────────────────────────────────────────────────────
+        # ────────────────────────────────────────────────────
+        # PASO 2 — Recuperación progresiva
+        # ────────────────────────────────────────────────────
         if is_apology and agg_count > 0:
-            # Siempre reiniciar al máximo cuando llega la primera disculpa.
-            # El silencio forzado pone rec_needed=1, pero una disculpa real
-            # merece el ciclo completo de 3 fases.
-            if rec_needed <= 1:
+            if rec_needed == 0:
                 rec_needed = getattr(settings, "RECOVERY_MESSAGES_REQUIRED", 3)
                 self.recovery_needed[user_id] = rec_needed
 
-            # Responder PRIMERO con el nivel actual, LUEGO avanzar fase
             response = self._recovery_response(rec_needed)
             rec_needed = max(0, rec_needed - 1)
             self.recovery_needed[user_id] = rec_needed
             if rec_needed == 0:
                 self.aggression_count[user_id] = 0
 
-            return self._return(user_id, message, sentiment, response, emotion,
-                                relationship_score, action="recovery")
+            return self._return(user_id, message, sentiment, response,
+                                emotion, relationship_score, action="recovery")
 
-        # Mensajes positivos sin disculpa también avanzan la recuperación
         if rec_needed > 0 and sentiment is not None and sentiment >= 0:
             rec_needed = max(0, rec_needed - 1)
             self.recovery_needed[user_id] = rec_needed
             if rec_needed == 0:
                 self.aggression_count[user_id] = 0
 
-        # ────────────────────────────────────────────────────────────
+        # ────────────────────────────────────────────────────
         # PASO 3 — Acción normal
-        # ────────────────────────────────────────────────────────────
+        # ────────────────────────────────────────────────────
         action = "respond"
         special_content = None
-
-        # Secretos bloqueados si hay daño alto o recuperación activa
         secret_blocked = rec_needed > 0 or agg_count > 0
 
         if sentiment is not None and relationship_score < ignore_threshold and sentiment < 0:
@@ -1128,7 +746,6 @@ class DecisionEngine:
             else:
                 action = "respond"
 
-        # PASO 4 — Contexto conversacional
         recent_interactions = await memory.get_recent_interactions(user_id, limit=3)
         context = self._analyze_conversation_context(
             current_message=message,
@@ -1137,7 +754,6 @@ class DecisionEngine:
             current_keywords=keywords
         )
 
-        # PASO 5 — Respuesta base (sin hechos si está en recuperación)
         facts_to_use = important_facts if rec_needed == 0 else {}
 
         response = self._generate_response(
@@ -1149,17 +765,14 @@ class DecisionEngine:
             traits=traits,
             empathy_bonus=empathy_bonus,
             relationship_score=relationship_score,
+            name=name,
         )
 
-        # ── Momentum Conversacional ───────────────────────────────────
-        if (
-            action == "respond"
-            and streak >= settings.SHORT_RESPONSE_STREAK_MAX
-            and rec_needed == 0
-        ):
+        # Momentum
+        if action == "respond" and streak >= settings.SHORT_RESPONSE_STREAK_MAX and rec_needed == 0:
             response = pick(MOMENTUM_DEPTH_PROMPTS)
 
-        # ── Curiosidad Activa (bloqueada en recuperación) ─────────────
+        # Curiosidad activa
         elif (
             action == "respond"
             and rec_needed == 0
@@ -1172,12 +785,16 @@ class DecisionEngine:
             question = self._contextual_question(keywords, sentiment, context)
             response = f"{response} {question}"
 
-        return self._return(user_id, message, sentiment, response, emotion,
-                            relationship_score, action=action)
+        return self._return(user_id, message, sentiment, response,
+                            emotion, relationship_score, action=action)
 
     # ============================================================
-    # HELPER — empaca el resultado siempre igual
+    # HELPERS
     # ============================================================
+
+    def _inject_name(self, text: str, name: str) -> str:
+        """Reemplaza {name} en cualquier respuesta."""
+        return text.replace("{name}", name)
 
     def _return(
         self,
@@ -1227,10 +844,6 @@ class DecisionEngine:
         else:
             return pick(RECOVERY_RESPONSES["phase_3"])
 
-    # ============================================================
-    # CURIOSIDAD CONTEXTUAL
-    # ============================================================
-
     def _contextual_question(self, keywords: list, sentiment: float, context: dict) -> str:
         if sentiment > 0.5:
             return pick(["¿Cómo te sientes con eso?", "¿Eso te hizo feliz?"])
@@ -1241,7 +854,7 @@ class DecisionEngine:
         return pick(CURIOSITY_QUESTIONS)
 
     # ============================================================
-    # ANÁLISIS DE CONTEXTO (sin cambios)
+    # ANÁLISIS DE CONTEXTO
     # ============================================================
 
     def _analyze_conversation_context(
@@ -1306,8 +919,8 @@ class DecisionEngine:
                     for i in range(len(non_zero) - 1)
                 )
                 if alternating:
-                    context["push_pull"]       = True
-                    context["emotional_swing"]  = True
+                    context["push_pull"]      = True
+                    context["emotional_swing"] = True
 
         if context["push_pull"]:
             context["repetition_level"] = 0
@@ -1315,7 +928,7 @@ class DecisionEngine:
         return context
 
     # ============================================================
-    # GENERACIÓN DE RESPUESTAS (sin cambios)
+    # GENERACIÓN DE RESPUESTAS
     # ============================================================
 
     def _generate_response(
@@ -1328,6 +941,7 @@ class DecisionEngine:
         traits: dict,
         empathy_bonus: float,
         relationship_score: float,
+        name: str = "tú",
     ) -> str:
 
         trust_lvl = trust_level(emotion.trust)
@@ -1338,17 +952,19 @@ class DecisionEngine:
             return pick(RESPUESTAS["ignore"])
 
         if action == "hostile_response":
-            return pick(RESPUESTAS["hostile_response"].get(trust_lvl, ["…"]))
+            raw = pick(RESPUESTAS["hostile_response"].get(trust_lvl, ["…"]))
+            return self._inject_name(raw, name)
 
         if action == "reveal_secret":
             secret   = special_content or "a veces me pregunto muchas cosas"
             opciones = RESPUESTAS["reveal_secret"].get(trust_lvl, ["Mm… {secret}"])
             base     = pick(opciones).format(secret=secret)
+            base     = self._inject_name(base, name)
             return self._wrap(base, energy, emotion.trust, context)
 
         emo_templates = RESPUESTAS["respond"].get(emo, RESPUESTAS["respond"]["neutral"])
         opciones      = emo_templates.get(trust_lvl, emo_templates.get("trust_mid", ["Mm…"]))
-        base          = pick(opciones)
+        base          = self._inject_name(pick(opciones), name)
 
         return self._wrap(base, energy, emotion.trust, context, important_facts, traits, empathy_bonus)
 
@@ -1365,18 +981,13 @@ class DecisionEngine:
         parts = []
 
         micro = micro_expresion(energy, trust)
-        if micro:
+        if micro and not base.startswith(micro.strip()):
             base = base[0].lower() + base[1:] if base else base
-        parts.append(micro + base)
+        parts.append((micro + base).strip())
 
         if trust > 40:
             ctx_phrase = self._pick_context_phrase(context)
             if ctx_phrase:
-                micro_has_jeje = "jeje" in micro.lower()
-                ctx_has_jeje   = "jeje" in ctx_phrase.lower()
-                if micro_has_jeje and ctx_has_jeje:
-                    ctx_phrase = ctx_phrase.lower().replace("jeje", "").strip().rstrip(",").strip()
-                    ctx_phrase = ctx_phrase[0].upper() + ctx_phrase[1:] if ctx_phrase else ""
                 parts.append(ctx_phrase)
 
         if energy > 60 and trust > 60:
@@ -1418,20 +1029,31 @@ class DecisionEngine:
             "me gusta más el silencio que el ruido.",
             "a veces finjo que todo está bien cuando no lo está.",
             "hay cosas que no le cuento a nadie, nomás las pienso.",
+            "me pregunto si los humanos también sienten cambios de energía como yo.",
         ]
         return random.choice(secrets)
 
 
 
         # core/emotion_engine.py
+# ============================================================
+# SocialBot v0.6.3
+# FIX 1: Delta máximo de confianza/energía por mensaje = 3.0
+#         Evita que un solo "te quiero" suba 15 puntos.
+# FIX 2: Umbrales de emoción más realistas + estados intermedios
+#         Antes: happy requería e>80 AND t>70 (casi imposible)
+#         Ahora: hay 5 zonas más naturales
+# ============================================================
 
 from typing import Optional
 from models.state import EmotionalState, Emotion
 from models.interaction import Interaction
 from core.memory import Memory
 from utils.logger import logger
-from config import settings   # ← Importación necesaria para los boosts
+from config import settings
 import time
+
+MAX_DELTA_PER_MESSAGE = 3.0   # tope de cambio por mensaje (energy y trust)
 
 
 class EmotionEngine:
@@ -1443,7 +1065,7 @@ class EmotionEngine:
         self.last_update_time = time.time()
 
     # ==========================================================
-    # MÉTODO GLOBAL (compatibilidad con Fase 1)
+    # MÉTODO GLOBAL
     # ==========================================================
 
     async def process_interaction(
@@ -1451,29 +1073,21 @@ class EmotionEngine:
         interaction: Interaction,
         memory: Memory
     ) -> EmotionalState:
-        """
-        Procesa una interacción sobre el estado global del engine.
-        (No utiliza repair_multiplier explícito, pero podría ampliarse en el futuro)
-        """
         updated = await self.process_interaction_for_state(
             state=self.state,
             interaction=interaction,
             memory=memory
-            # repair_multiplier se omite → toma valor por defecto 1.0
         )
-
         self.state = updated
         self.last_update_time = time.time()
-
         logger.info(
             f"Emoción actualizada: {updated.primary_emotion.value} "
             f"(energía={updated.energy:.1f}, confianza={updated.trust:.1f})"
         )
-
         return updated
 
     # ==========================================================
-    # MÉTODO POR ESTADO EXTERNO (Fase 2 - perfiles)
+    # MÉTODO POR ESTADO EXTERNO
     # ==========================================================
 
     async def process_interaction_for_state(
@@ -1481,67 +1095,79 @@ class EmotionEngine:
         state: EmotionalState,
         interaction: Interaction,
         memory: Memory,
-        repair_multiplier: float = 1.0,   # ← Nuevo parámetro opcional
-        relationship_damage=0.0   # ← NUEVO
-        
+        repair_multiplier: float = 1.0,
+        relationship_damage: float = 0.0,
+        aggression_impact: dict = None,
     ) -> EmotionalState:
-        """
-        Procesa una interacción sobre un estado específico (p.ej., perfil de usuario).
-        Si repair_multiplier > 1.0 y el sentimiento no es negativo, se aplican
-        boosts de reparación adicionales.
-        """
+
         self._apply_time_decay_to_state(state, interaction.timestamp.timestamp())
 
-        # Calcular impactos base
-        sentiment_impact = interaction.sentiment * 15
-        history_impact = memory.get_average_sentiment_for(interaction.user_id) * 10
-        global_impact = memory.get_recent_global_sentiment() * 5
+        if aggression_impact:
+            # Agresión: impacto directo sin tapear (los golpes deben sentirse)
+            state.energy = self._clamp(state.energy + aggression_impact.get("energy", 0))
+            state.trust  = self._clamp(state.trust  + aggression_impact.get("trust",  0))
 
-        total_impact = sentiment_impact + history_impact + global_impact
+        else:
+            # Flujo normal — calcular delta y tapearlo
+            sentiment_impact = interaction.sentiment * 15
+            history_impact   = memory.get_average_sentiment_for(interaction.user_id) * 10
+            global_impact    = memory.get_recent_global_sentiment() * 5
+            total_impact     = sentiment_impact + history_impact + global_impact
 
-        # Aplicar reparación SOLO si el mensaje no es negativo
-        if interaction.sentiment >= 0 and repair_multiplier > 1.0:
-            total_impact += settings.REPAIR_ENERGY_BOOST * repair_multiplier
-            state.trust += settings.REPAIR_TRUST_BOOST * repair_multiplier
+            if interaction.sentiment >= 0 and repair_multiplier > 1.0:
+                total_impact += settings.REPAIR_ENERGY_BOOST * repair_multiplier
+                trust_repair  = settings.REPAIR_TRUST_BOOST * repair_multiplier
+                state.trust  = self._clamp(
+                    state.trust + self._cap_delta(trust_repair)
+                )
 
-        # Actualizar energía y confianza con factores de ponderación
-        state.energy = self._clamp(state.energy + total_impact * 0.3)
-        state.trust = self._clamp(state.trust + total_impact * 0.2)
+            energy_delta = total_impact * 0.3
+            trust_delta  = total_impact * 0.2
+
+            state.energy = self._clamp(state.energy + self._cap_delta(energy_delta))
+            state.trust  = self._clamp(state.trust  + self._cap_delta(trust_delta))
 
         self._update_primary_emotion(state)
-
         state.last_updated = interaction.timestamp.timestamp()
-
         return state
 
     # ==========================================================
-    # LÓGICA INTERNA UNIFICADA
+    # LÓGICA INTERNA
     # ==========================================================
 
+    def _cap_delta(self, delta: float) -> float:
+        """Limita el cambio máximo por mensaje para subidas/bajadas graduales."""
+        return max(-MAX_DELTA_PER_MESSAGE, min(MAX_DELTA_PER_MESSAGE, delta))
+
     def _apply_time_decay_to_state(self, state: EmotionalState, reference_time: float):
-        """Aplica decaimiento natural con el tiempo (por horas)."""
         if not state.last_updated:
             return
-
         hours_passed = (reference_time - state.last_updated) / 3600
         if hours_passed <= 0:
             return
-
         decay_factor = self.mood_decay ** hours_passed
-
         state.energy = self._clamp(state.energy * decay_factor)
-        state.trust = self._clamp(state.trust * decay_factor)
+        state.trust  = self._clamp(state.trust  * decay_factor)
 
     def _update_primary_emotion(self, state: EmotionalState):
-        """Determina la emoción principal basada en energía y confianza."""
+        """
+        FIX v0.6.3: Umbrales más realistas.
+
+        Zonas:
+          happy   → e > 65 AND t > 60   (alcanzable con conversación positiva)
+          sad     → e < 25              (energía muy baja)
+          angry   → t < 25              (confianza muy baja)
+          fearful → e < 40 AND t < 40   (ambas bajas)
+          neutral → todo lo demás
+        """
         e = state.energy
         t = state.trust
 
-        if e < 20:
-            state.primary_emotion = Emotion.SAD
-        elif e > 80 and t > 70:
+        if e > 65 and t > 60:
             state.primary_emotion = Emotion.HAPPY
-        elif t < 30:
+        elif e < 25:
+            state.primary_emotion = Emotion.SAD
+        elif t < 25:
             state.primary_emotion = Emotion.ANGRY
         elif e < 40 and t < 40:
             state.primary_emotion = Emotion.FEARFUL
@@ -1549,11 +1175,9 @@ class EmotionEngine:
             state.primary_emotion = Emotion.NEUTRAL
 
     def _clamp(self, value: float) -> float:
-        """Mantiene el valor en el rango [0, 100]."""
         return max(0.0, min(100.0, value))
 
-
-        # core/memory.py
+# core/memory.py
 
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -1646,7 +1270,7 @@ class Memory:
         return sum(sentiments) / len(sentiments)
 
 
-        # config/personality_core.py
+# config/personality_core.py
 # Valores base de la personalidad de Sofía (no cambian por usuario)
 PERSONALITY_CORE = {
     "attachment": 30.0,        # tendencia a establecer vínculos
@@ -1655,6 +1279,8 @@ PERSONALITY_CORE = {
     "sensitivity": 50.0,       # sensibilidad emocional
     "depth": 65.0,             # tendencia a reflexionar
 }
+
+
 
 # core/session_manager.py
 # ============================================================
@@ -1853,7 +1479,8 @@ class SessionManager:
         return fact
 
 
-import re
+
+        import re
 from datetime import datetime
 from typing import Optional, List, Dict
 
@@ -2185,8 +1812,7 @@ class UserProfileManager:
         return modifiers
 
 
-
-        # models/interaction.py
+# models/interaction.py
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -2225,7 +1851,7 @@ class Interaction:
             emotion_after=data["emotion_after"]
         )
 
-# models/state.py
+        # models/state.py
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
@@ -2241,8 +1867,8 @@ class Emotion(Enum):
 class EmotionalState:
     """Estado emocional actual del bot"""
     primary_emotion: Emotion = Emotion.NEUTRAL
-    energy: float = 100.0      # 0-100, qué tan activo/enérgico
-    trust: float = 100.0       # 0-100, confianza general en usuarios
+    energy: float = 50.0      # ← FIX: era 100.0, ahora 50.0 (más realista para usuario nuevo)
+    trust: float = 50.0       # ← FIX: era 100.0, ahora 50.0
     last_updated: Optional[float] = None  # timestamp
 
     def to_dict(self) -> dict:
@@ -2264,7 +1890,8 @@ class EmotionalState:
 
 
 
-        from dataclasses import dataclass, field
+
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Dict
 from models.state import EmotionalState
@@ -2346,6 +1973,7 @@ class UserProfile:
             important_facts=important_facts,
             relationship_damage=relationship_damage
         )
+
 
         # storage/database.py
 # ============================================================
@@ -2651,9 +2279,11 @@ class Database:
             }
 
 
-            # utils/aggression_detector.py
+
+# utils/aggression_detector.py
 # ============================================================
 # SocialBot v0.6.0 — Detector de Agresión Contextual
+# FIX: Pesos de impacto aumentados para que se noten en la UI
 # ============================================================
 
 import unicodedata
@@ -2681,10 +2311,13 @@ INSULT_LEVELS = {
     ],
 }
 
+# FIX: Valores aumentados — antes eran muy bajos y se diluían
+# con los multiplicadores 0.3/0.2 del emotion_engine.
+# Ahora se aplican DIRECTO al estado, sin diluir.
 IMPACT_WEIGHTS = {
-    "leve":  {"energy": -5.0,  "trust": -3.0,  "damage": 0.5},
-    "medio": {"energy": -10.0, "trust": -7.0,  "damage": 1.5},
-    "alto":  {"energy": -18.0, "trust": -12.0, "damage": 3.0},
+    "leve":  {"energy": -8.0,  "trust": -6.0,  "damage": 1.0},
+    "medio": {"energy": -15.0, "trust": -12.0, "damage": 2.5},
+    "alto":  {"energy": -25.0, "trust": -18.0, "damage": 4.0},
 }
 
 # Si el mensaje tiene estos tokens Y trust > 75 → broma, impacto reducido
@@ -2738,7 +2371,7 @@ class AggressionDetector:
 
 
 
-# utils/logger.py
+        # utils/logger.py
 import logging
 import sys
 from pathlib import Path
@@ -2770,7 +2403,6 @@ def setup_logger(name: str = "social_bot", level=logging.INFO):
 
 # Crear una instancia global para usar en toda la app
 logger = setup_logger()
-
 
 
 
@@ -2928,10 +2560,9 @@ class TextAnalyzer:
 
         # discord_bot.py
 # ============================================================
-# SocialBot v0.6.1 — Discord
-# Cambios v0.6.1:
-#   - Embed de estado emocional debajo de cada respuesta
-#   - Muestra: emoción, energía, confianza, daño, agresión sesión
+# SocialBot v0.6.0
+# NUEVO: display_name del usuario se pasa al decision_engine
+#        para que Sofía mencione al usuario por nombre.
 # ============================================================
 
 import asyncio
@@ -2952,19 +2583,11 @@ from config import settings
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# ============================================================
-# CONFIGURACIÓN DEL BOT
-# ============================================================
-
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
-# ============================================================
-# INSTANCIAS GLOBALES
-# ============================================================
 
 db              = Database(str(settings.DATABASE_PATH))
 memory          = Memory(db)
@@ -2975,87 +2598,13 @@ session_manager = SessionManager(db)
 
 
 # ============================================================
-# HELPERS — Embed de estado emocional
-# ============================================================
-
-EMOTION_COLORS = {
-    "happy":   0x57F287,   # verde
-    "neutral": 0x5865F2,   # azul Discord
-    "sad":     0x4E5058,   # gris oscuro
-    "angry":   0xED4245,   # rojo
-    "fearful": 0xFEE75C,   # amarillo
-}
-
-EMOTION_EMOJI = {
-    "happy":   "😊",
-    "neutral": "😐",
-    "sad":     "😔",
-    "angry":   "😠",
-    "fearful": "😨",
-}
-
-def _energy_bar(value: float, length: int = 10) -> str:
-    filled = round(value / 100 * length)
-    return "█" * filled + "░" * (length - filled)
-
-def build_state_embed(profile, decision_engine, user_id: str) -> discord.Embed:
-    """Construye el embed de estado emocional de Sofía."""
-    estado   = profile.emotional_state
-    emo_val  = estado.primary_emotion.value
-    color    = EMOTION_COLORS.get(emo_val, 0x5865F2)
-    emoji    = EMOTION_EMOJI.get(emo_val, "😐")
-
-    agg_count  = decision_engine.aggression_count.get(user_id, 0)
-    rec_needed = decision_engine.recovery_needed.get(user_id, 0)
-
-    embed = discord.Embed(color=color)
-    embed.set_author(name="Estado emocional de Sofía")
-
-    embed.add_field(
-        name="Emoción",
-        value=f"{emoji} `{emo_val}`",
-        inline=True
-    )
-    embed.add_field(
-        name="Energía",
-        value=f"`{estado.energy:5.1f}` {_energy_bar(estado.energy)}",
-        inline=True
-    )
-    embed.add_field(
-        name="Confianza",
-        value=f"`{estado.trust:5.1f}` {_energy_bar(estado.trust)}",
-        inline=True
-    )
-    embed.add_field(
-        name="Daño relacional",
-        value=f"`{profile.relationship_damage:.2f}`",
-        inline=True
-    )
-
-    # Mostrar estado de agresión/recuperación si hay algo activo
-    if agg_count > 0 or rec_needed > 0:
-        status_parts = []
-        if agg_count > 0:
-            status_parts.append(f"⚠️ Insultos sesión: `{agg_count}`")
-        if rec_needed > 0:
-            status_parts.append(f"🔄 Recuperación: `{rec_needed}` msgs pendientes")
-        embed.add_field(
-            name="Estado de sesión",
-            value="\n".join(status_parts),
-            inline=False
-        )
-
-    return embed
-
-
-# ============================================================
 # EVENTOS
 # ============================================================
 
 @bot.event
 async def on_ready():
     logger.info(f"Sofía conectada como {bot.user}")
-    print(f"\n✅ Sofía está en línea como {bot.user}\n")
+    print(f"\n✅ Sofía está en línea como {bot.user} (v{settings.VERSION})\n")
 
 
 @bot.event
@@ -3083,18 +2632,13 @@ async def on_message(message):
     if not content:
         content = "hola"
 
-    user_id = str(message.author.id)
+    user_id      = str(message.author.id)
+    display_name = message.author.display_name   # ← nombre real del usuario
 
     async with message.channel.typing():
-        response, profile = await process_message(user_id, content)
+        response = await process_message(user_id, content, display_name)
 
-    # Respuesta de texto
     await message.reply(response)
-
-    # Embed de estado emocional debajo
-    embed = build_state_embed(profile, decision, user_id)
-    await message.channel.send(embed=embed)
-
     await bot.process_commands(message)
 
 
@@ -3102,9 +2646,8 @@ async def on_message(message):
 # PROCESAR MENSAJE
 # ============================================================
 
-async def process_message(user_id: str, message: str):
-    """Retorna (response, profile) para poder construir el embed."""
-    logger.info(f"Mensaje de {user_id}: {message}")
+async def process_message(user_id: str, message: str, display_name: str = "tú") -> str:
+    logger.info(f"Mensaje de {display_name} ({user_id}): {message}")
 
     profile   = await profile_manager.get_or_create_profile(user_id)
     modifiers = profile_manager.get_behavior_modifiers(profile)
@@ -3114,18 +2657,29 @@ async def process_message(user_id: str, message: str):
         message=message,
         emotion=profile.emotional_state,
         memory=memory,
-        profile_modifiers=modifiers
+        profile_modifiers=modifiers,
+        display_name=display_name,        # ← NUEVO
     )
 
     interaction       = decision_result["interaction"]
     repair_multiplier = decision.analyzer.get_repair_multiplier(message)
+
+    # Detectar impacto de agresión para pasarlo al emotion_engine
+    aggression_impact = None
+    if decision_result["action"] in ("boundary", "silence", "limit"):
+        agg = decision.aggression_detector.detect(
+            message, trust=profile.emotional_state.trust
+        )
+        if agg["detected"]:
+            aggression_impact = agg["impact"]
 
     new_state = await emotion_engine.process_interaction_for_state(
         state=profile.emotional_state,
         interaction=interaction,
         memory=memory,
         repair_multiplier=repair_multiplier,
-        relationship_damage=profile.relationship_damage
+        relationship_damage=profile.relationship_damage,
+        aggression_impact=aggression_impact,
     )
 
     interaction.emotion_after = new_state.primary_emotion.value
@@ -3134,7 +2688,7 @@ async def process_message(user_id: str, message: str):
     await memory.remember(interaction)
     await profile_manager.update_profile_from_interaction(profile, interaction)
 
-    return decision_result["response"], profile
+    return decision_result["response"]
 
 
 # ============================================================
@@ -3144,31 +2698,22 @@ async def process_message(user_id: str, message: str):
 @bot.command(name="sofia")
 async def sofia_info(ctx):
     await ctx.send(
-        f"Holi, soy Sofía 😊\n"
+        f"Soy Sofía 😊\n"
         f"Versión: `{settings.VERSION}`\n"
         f"Creada por: `JesusJM`\n"
         f"Mencióname o escríbeme por DM para hablar."
     )
 
 
-@bot.command(name="estado")
-async def estado_cmd(ctx):
-    """!estado — muestra el estado emocional de Sofía contigo"""
-    user_id = str(ctx.author.id)
-    profile = await profile_manager.get_or_create_profile(user_id)
-    embed   = build_state_embed(profile, decision, user_id)
-    await ctx.send(embed=embed)
-
-
 @bot.command(name="reset")
 async def reset_cmd(ctx):
-    """!reset — resetea los contadores de sesión (solo para testing)"""
+    """!reset — resetea contadores de sesión (testing)"""
     user_id = str(ctx.author.id)
     decision.aggression_count.pop(user_id, None)
     decision.recovery_needed.pop(user_id, None)
     decision.short_streak.pop(user_id, None)
     decision.secrets_revealed.pop(user_id, None)
-    await ctx.send("🔄 Contadores de sesión reseteados.")
+    await ctx.send("🔄 Contadores reseteados.")
 
 
 # ============================================================
@@ -3177,105 +2722,6 @@ async def reset_cmd(ctx):
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("❌ No encontré el token. Crea un archivo .env con DISCORD_TOKEN=tu_token")
+        print("❌ No encontré el token. Crea un .env con DISCORD_TOKEN=tu_token")
     else:
         bot.run(TOKEN)
-
-
-# main.py
-# ============================================================
-# SocialBot v0.5.0 — Memoria Episódica
-# Cambios:
-#   - Integra SessionManager al arrancar y al cerrar
-#   - Sofía saluda según el historial del usuario
-#   - Al escribir 'salir' guarda la sesión automáticamente
-# ============================================================
-
-import asyncio
-from utils.logger import logger
-from storage.database import Database
-from core.memory import Memory
-from core.emotion_engine import EmotionEngine
-from core.decision_engine import DecisionEngine
-from core.user_profile_manager import UserProfileManager
-from core.session_manager import SessionManager
-from config import settings
-
-
-class SocialBot:
-    def __init__(self):
-        self.db              = Database(str(settings.DATABASE_PATH))
-        self.memory          = Memory(self.db)
-        self.profile_manager = UserProfileManager(self.db)
-        self.emotion_engine  = EmotionEngine()
-        self.decision        = DecisionEngine()
-        self.session_manager = SessionManager(self.db)   # 🆕
-        logger.info("Bot inicializado.")
-
-    async def process_message(self, user_id: str, message: str) -> str:
-        logger.info(f"Mensaje de {user_id}: {message}")
-
-        profile   = await self.profile_manager.get_or_create_profile(user_id)
-        modifiers = self.profile_manager.get_behavior_modifiers(profile)
-
-        decision = await self.decision.decide_response(
-            user_id=user_id,
-            message=message,
-            emotion=profile.emotional_state,
-            memory=self.memory,
-            profile_modifiers=modifiers
-        )
-
-        interaction      = decision["interaction"]
-        repair_multiplier = self.decision.analyzer.get_repair_multiplier(message)
-
-        new_state = await self.emotion_engine.process_interaction_for_state(
-            state=profile.emotional_state,
-            interaction=interaction,
-            memory=self.memory,
-            repair_multiplier=repair_multiplier,
-            relationship_damage=profile.relationship_damage
-        )
-
-        interaction.emotion_after  = new_state.primary_emotion.value
-        profile.emotional_state    = new_state
-
-        await self.memory.remember(interaction)
-        await self.profile_manager.update_profile_from_interaction(profile, interaction)
-
-        return decision["response"]
-
-    async def run_cli(self):
-        print(f"\n--- {settings.BOT_NAME} v{settings.VERSION} ---")
-        print("Escribe 'salir' para terminar.\n")
-
-        user_id = "test_user_1"
-
-        # 🆕 Saludo con memoria episódica
-        greeting = self.session_manager.get_greeting(user_id)
-        print(f"Sofía: {greeting}\n")
-
-        while True:
-            user_input = input("Tú: ")
-            if user_input.lower() in ["salir", "exit", "quit"]:
-                # 🆕 Guardar sesión al cerrar
-                profile = await self.profile_manager.get_or_create_profile(user_id)
-                self.session_manager.save_session(user_id, profile)
-                print("Sofía: ¡Hasta luego! 😊")
-                break
-
-            response = await self.process_message(user_id, user_input)
-            print(f"Sofía: {response}")
-
-            profile = await self.profile_manager.get_or_create_profile(user_id)
-            estado  = profile.emotional_state
-            print(f"[{estado.primary_emotion.value} | energía:{estado.energy:.1f} confianza:{estado.trust:.1f} daño:{profile.relationship_damage:.2f}]\n")
-
-
-async def main():
-    bot = SocialBot()
-    await bot.run_cli()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
