@@ -15,7 +15,7 @@ LOG_DIR  = BASE_DIR / "logs"
 DATABASE_PATH = DATA_DIR / "bot_data.db"
 
 BOT_NAME = "SocialBot"
-VERSION  = "0.6.2"
+VERSION  = "0.5.4"
 
 INITIAL_ENERGY = 50.0
 INITIAL_TRUST  = 50.0
