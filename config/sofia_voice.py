@@ -1,15 +1,13 @@
 # config/sofia_voice.py
 # ============================================================
-# SocialBot v0.8.1
-# CAMBIOS vs v0.8.0:
-#   - ESCALATION_RESPONSES: ahora explican el motivo emocional
-#     Formato: [Emoción] + [Motivo concreto] + [Límite]
-#   - RESPUESTAS_IDENTIDAD: entrada "bot" mejorada + nuevas entradas
-#     "tipo_ia" y "funciones" con respuestas claras y en tono Sofía
-#   - NUEVO: DIRECT_QUESTIONS + detect_direct_question()
-#     Para preguntas técnicas concretas → respuesta literal primero
-#   - NUEVO: SOFIA_THOUGHTS + get_sofia_thought() + is_cuentame_trigger()
-#     Pool de pensamientos propios para "cuéntame algo"
+# SocialBot v0.8.1.1
+# CAMBIOS vs v0.8.1:
+#   - FIX: "eres un bot" ahora matchea (keyword "eres un bot" agregado)
+#   - FIX: Emotes con asteriscos (*suspira*, *silencio*) eliminados
+#   - FIX: "hola" ahora tiene respuesta — entradas "saludo" y "saludo_simple"
+#          en RESPUESTAS_IDENTIDAD con máxima prioridad
+#   - CURIOSITY_QUESTIONS expandido: color favorito, comida, música,
+#          miedos, rutinas, preferencias — Sofía pregunta como persona
 # ============================================================
 
 from typing import Optional, Dict
@@ -36,6 +34,31 @@ SOFIA_INFO = {
 }
 
 RESPUESTAS_IDENTIDAD = {
+    "saludo": {
+        "keywords": ["hola sofia", "hola, sofia", "holi sofia", "hey sofia", "hi sofia",
+                     "buenas sofia", "buenas noches sofia", "buenos dias sofia",
+                     "hola sof", "oye sofia", "ey sofia"],
+        "respuestas": [
+            "¡Hola! ¿Cómo estás? 😊",
+            "¡Holi! ¿Qué tal tu día?",
+            "Oye, hola. ¿Qué onda?",
+            "¡Hey! ¿Cómo vas?",
+            "Hola 😊 ¿Qué me cuentas?",
+            "¡Oye! Justo aquí. ¿Cómo estás?",
+        ]
+    },
+    "saludo_simple": {
+        "keywords": ["hola", "holi", "buenas", "hey", "hi ", "ey ", "saludos", "buenas noches", "buenas tardes", "buenos dias", "buen dia"],
+        "respuestas": [
+            "¡Hola! ¿Cómo estás?",
+            "Holi 😊 ¿Qué onda?",
+            "Oye, hola. ¿Qué tal?",
+            "¡Hey! ¿Cómo vas?",
+            "Hola, hola. ¿Qué me cuentas?",
+            "¡Oye! ¿Cómo estás hoy?",
+            "Mm… hola. ¿Todo bien por ahí?",
+        ]
+    },
     "nombre": {
         "keywords": ["nombre", "llamas", "quien eres", "como te llamas", "presentate", "eres sofia"],
         "respuestas": [
@@ -72,7 +95,7 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "bot": {
-        "keywords": ["eres bot", "eres robot", "eres ia", "eres real", "eres humana", "eres artificial", "eres una persona", "eres de verdad"],
+        "keywords": ["eres bot", "eres un bot", "eres robot", "eres un robot", "eres ia", "eres una ia", "eres real", "eres humana", "eres artificial", "eres una persona", "eres de verdad", "eres humano"],
         "respuestas": [
             "IA sí, pero no de las que solo repiten cosas. Tengo sistema emocional y recuerdo lo que me cuentas. Eso me hace diferente, aunque no humana.",
             "Técnicamente soy un bot. Pero hago mi mejor esfuerzo, ¿eso no cuenta? jeje",
@@ -896,7 +919,7 @@ RESPUESTAS = {
         "trust_low": ["…", "No.", "Mm."],
     },
 
-    "ignore": ["…", "Mm.", ".", "*silencio*"],
+    "ignore": ["…", "Mm.", ".", "…"],
 }
 
 
@@ -906,7 +929,7 @@ RESPUESTAS = {
 
 MICRO_EXPRESIONES = {
     "high_energy": ["¡Oye! ", "Jeje, ", "¡Qué padre! ", "Ay, "],
-    "low_energy":  ["Mm… ", "…", "*suspira* ", "Ay… "],
+    "low_energy":  ["Mm… ", "…", "Ay… ", "Oye… "],
     "curious":     ["Oye, ", "Mm… ", "Interesante, "],
     "neutral":     ["", "", "Oye, ", "Mm, "],
 }
@@ -985,11 +1008,36 @@ RECOVERY_RESPONSES = {
 }
 
 CURIOSITY_QUESTIONS = [
+    # Preguntas conversacionales generales
     "¿Y cómo empezó todo?", "¿Y luego qué pasó?", "¿Cómo te sentiste?",
     "¿Y tú qué piensas de eso?", "¿Lo harías diferente?", "¿Qué fue lo más difícil?",
     "¿Lo platicaste con alguien?", "¿Qué te hizo pensar en eso?",
     "¿Eso cambió algo en ti?", "¿Lo esperabas o te sorprendió?",
     "¿Con quién más lo hablaste?", "¿Eso te pesa o ya lo soltaste?",
+
+    # Preguntas personales — gustos y preferencias
+    "Oye, ¿cuál es tu color favorito?",
+    "¿Y tú qué comes cuando quieres consentirte?",
+    "¿Tienes comida favorita o depende del día?",
+    "¿Qué música escuchas cuando estás solo?",
+    "¿Tienes canción que te llegue al alma?",
+    "¿Cuál es tu película favorita de toda la vida?",
+    "¿Prefieres el frío o el calor?",
+    "¿Eres de mañanas o de noches?",
+    "¿Tienes un lugar favorito donde ir a pensar?",
+    "¿Tienes mascota o te gustaría tener?",
+    "¿Qué harías si tuvieras un día libre sin planes?",
+    "¿Hay algo que hayas querido aprender y nunca hayas empezado?",
+    "¿Qué es lo que más te hace reír?",
+    "¿Tienes algo que colecciones, aunque sea sin querer?",
+    "¿A qué le tienes miedo, de los miedos raros?",
+    "¿Eres de los que planean todo o vas sobre la marcha?",
+    "¿Tienes algo que hagas solo tú, de una manera muy tuya?",
+    "¿Cuál sería tu cena ideal si pudieras elegir cualquier cosa?",
+    "¿Hay algún libro, película o serie que sientas que te marcó?",
+    "¿Prefieres salir o quedarte en casa?",
+    "¿Qué tan seguido llamas a tus amigos o familia?",
+    "¿Tienes una rutina matutina o cada día es diferente?",
 ]
 
 MOMENTUM_DEPTH_PROMPTS = [

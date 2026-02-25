@@ -1,13 +1,15 @@
 # core/decision_engine.py
 # ============================================================
-# SocialBot v0.8.1
-# CAMBIOS vs v0.8.0:
-#   - PRIORIDAD 1.5: detector "cuéntame algo" — usa SOFIA_THOUGHTS
-#     para dar iniciativa propia cuando el usuario pide que cuente algo.
-#   - PRIORIDAD 4.5: detector pregunta directa — responde literal primero
-#     antes de cualquier fallback emocional. Usa DIRECT_QUESTIONS.
-#   - Importaciones actualizadas: detect_direct_question, get_sofia_thought,
-#     is_cuentame_trigger.
+# SocialBot v0.8.1.1
+# CAMBIOS vs v0.8.1:
+#   - FIX: Modo noche = DECORADOR. Ya no pisa la respuesta principal.
+#          La respuesta se genera normal, el comentario nocturno se añade
+#          al final opcionalmente (30% prob). Ej: "No tengo internet.
+#          Por cierto, ya es tarde ¿no deberías descansar?"
+#   - _night_response() reemplazado por _night_comment() — comentarios
+#     cortos para decorar, no para reemplazar.
+#   - is_cuentame_trigger, get_sofia_thought, detect_direct_question
+#     importados desde sofia_voice.
 # ============================================================
 
 from datetime import datetime, date
@@ -273,12 +275,12 @@ class DecisionEngine:
             return self._return(user_id, message, sentiment, thought,
                                 emotion, relationship_score, action="initiative")
 
-        # PRIORIDAD 2 — Modo noche (respuesta íntima)
-        if emotion_engine and emotion_engine.is_night_mode():
-            night_resp = self._night_response(emotion.trust, name)
-            if night_resp and random.random() < 0.35:
-                return self._return(user_id, message, sentiment, night_resp,
-                                    emotion, relationship_score, action="night")
+        # PRIORIDAD 2 — Modo noche (v0.8.1: DECORADOR, no reemplazo)
+        # El comentario nocturno se añade AL FINAL de la respuesta real, no la pisa.
+        # Se guarda aquí y se aplica después de generar la respuesta principal.
+        night_comment = None
+        if emotion_engine and emotion_engine.is_night_mode() and random.random() < 0.30:
+            night_comment = self._night_comment(emotion.trust, name)
 
         # PRIORIDAD 3 — Ofensa activa
         aggression = self.aggression_detector.detect(message, trust=emotion.trust)
@@ -413,6 +415,12 @@ class DecisionEngine:
                 emotion_engine=emotion_engine,
             )
 
+        # PRIORIDAD 9 — Decorador nocturno (v0.8.1)
+        # Se añade AL FINAL sin pisar la respuesta principal.
+        # Solo en respuestas normales, no en boundary/silence/identity.
+        if night_comment and action in ("respond", "direct_answer", "initiative", "opinion"):
+            response = f"{response} {night_comment}"
+
         return self._return(user_id, message, sentiment, response,
                             emotion, relationship_score, action=action)
 
@@ -483,12 +491,26 @@ class DecisionEngine:
     def _inject_name(self, text: str, name: str) -> str:
         return text.replace("{name}", name)
 
-    def _night_response(self, trust: float, name: str) -> Optional[str]:
-        """Genera una respuesta nocturna íntima."""
-        lvl = trust_level(trust)
-        opciones = NIGHT_RESPONSES.get(lvl, NIGHT_RESPONSES["trust_low"])
-        raw = pick(opciones)
-        return self._inject_name(raw, name)
+    def _night_comment(self, trust: float, name: str) -> Optional[str]:
+        """
+        v0.8.1 — Comentario nocturno CORTO para añadir al final de la respuesta.
+        No reemplaza la respuesta, la decora.
+        """
+        trust_high = trust > 70
+        comentarios_high = [
+            f"Por cierto {name}… ya es tarde, ¿no deberías descansar?",
+            "Oye, ¿no es muy tarde para estar despierto?",
+            f"A esta hora las conversaciones se ponen raras, ¿verdad {name}? jeje",
+            "Mm… ya es tarde. Pero aquí estoy.",
+        ]
+        comentarios_mid = [
+            "Por cierto, ya es tarde.",
+            "Oye… ¿no deberías estar durmiendo?",
+            "Mm… es hora rara para hablar jeje.",
+            "Ya es noche, ¿todo bien?",
+        ]
+        opciones = comentarios_high if trust_high else comentarios_mid
+        return pick(opciones)
 
     def _daily_secrets_reset(self, user_id: str):
         """FIX: resetea secrets_revealed si cambió el día."""
