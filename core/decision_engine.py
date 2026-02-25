@@ -2,14 +2,16 @@
 # ============================================================
 # SocialBot v0.8.1.1
 # CAMBIOS vs v0.8.1:
-#   - FIX: Modo noche = DECORADOR. Ya no pisa la respuesta principal.
-#          La respuesta se genera normal, el comentario nocturno se añade
-#          al final opcionalmente (30% prob). Ej: "No tengo internet.
-#          Por cierto, ya es tarde ¿no deberías descansar?"
-#   - _night_response() reemplazado por _night_comment() — comentarios
-#     cortos para decorar, no para reemplazar.
-#   - is_cuentame_trigger, get_sofia_thought, detect_direct_question
-#     importados desde sofia_voice.
+#   - FIX modo noche = DECORADOR. Respuesta real primero, comentario nocturno
+#     opcional al final. _night_response → _night_comment.
+#   - NUEVO PRIORIDAD 4.7: anti-repetición inmediata. Si el usuario manda
+#     el mismo mensaje seguido → respuestas escalonadas (REPEAT_RESPONSES).
+#     Contador por usuario en RAM (_last_message, _repeat_count).
+#   - Los returns tempranos (identity, initiative, direct_answer) también
+#     resetean _last_message para que el tracker no quede desincronizado.
+#   - NOTA: añadir al !reset en discord_bot.py:
+#       decision._last_message.pop(user_id, None)
+#       decision._repeat_count.pop(user_id, None)
 # ============================================================
 
 from datetime import datetime, date
@@ -28,14 +30,15 @@ from config.sofia_voice import (
     RECOVERY_RESPONSES,
     CURIOSITY_QUESTIONS,
     MOMENTUM_DEPTH_PROMPTS,
+    REPEAT_RESPONSES,                # NUEVO v0.8.1.1
     get_opinion,
     OPINIONES,
     QUOTE_RECALL_PHRASES,
     NIGHT_RESPONSES,
     RESPUESTAS_NOCHE,
-    detect_direct_question,      # NUEVO v0.8.1
-    get_sofia_thought,           # NUEVO v0.8.1
-    is_cuentame_trigger,         # NUEVO v0.8.1
+    detect_direct_question,
+    get_sofia_thought,
+    is_cuentame_trigger,
 )
 import random
 import time
@@ -190,6 +193,9 @@ class DecisionEngine:
         self.recovery_needed:   Dict[str, int]  = {}
         self.short_streak:      Dict[str, int]  = {}
         self._topic_question_history: Dict[str, list] = {}
+        # NUEVO v0.8.1.1 — Anti-repetición inmediata
+        self._last_message:     Dict[str, str]  = {}   # último mensaje por usuario
+        self._repeat_count:     Dict[str, int]  = {}   # cuántas veces seguidas lo repitió
 
     # ============================================================
     # MÉTODO PRINCIPAL
@@ -264,6 +270,8 @@ class DecisionEngine:
         # PRIORIDAD 1 — Identidad
         identity_response = detect_identity_question(message)
         if identity_response:
+            self._last_message[user_id] = message
+            self._repeat_count[user_id] = 0
             return self._return(user_id, message, sentiment,
                                 self._inject_name(identity_response, name),
                                 emotion, relationship_score, action="identity")
@@ -271,6 +279,8 @@ class DecisionEngine:
         # PRIORIDAD 1.5 — "Cuéntame algo" / iniciativa propia (NUEVO v0.8.1)
         # Sofía responde con un pensamiento propio antes de cualquier otra lógica.
         if is_cuentame_trigger(message):
+            self._last_message[user_id] = message
+            self._repeat_count[user_id] = 0
             thought = get_sofia_thought()
             return self._return(user_id, message, sentiment, thought,
                                 emotion, relationship_score, action="initiative")
@@ -334,6 +344,8 @@ class DecisionEngine:
         # Aplica siempre, independiente del estado emocional.
         direct_answer = detect_direct_question(message)
         if direct_answer:
+            self._last_message[user_id] = message
+            self._repeat_count[user_id] = 0
             # Toque de personalidad ocasional al final
             if random.random() < 0.4:
                 toques = [
@@ -345,6 +357,31 @@ class DecisionEngine:
                 direct_answer += random.choice(toques)
             return self._return(user_id, message, sentiment, direct_answer,
                                 emotion, relationship_score, action="direct_answer")
+
+        # PRIORIDAD 4.7 — Anti-repetición inmediata (NUEVO v0.8.1.1)
+        # Detecta si el usuario manda el mismo mensaje dos o más veces seguidas.
+        # Actúa ANTES de opinión/tema para que el bucle de pizza no se repita.
+        import unicodedata as _uc
+        def _norm_msg(t: str) -> str:
+            return _uc.normalize("NFD", t.strip().lower()).encode("ascii", "ignore").decode()
+
+        msg_norm = _norm_msg(message)
+        last_norm = _norm_msg(self._last_message.get(user_id, ""))
+
+        if msg_norm == last_norm and msg_norm:
+            # Mismo mensaje consecutivo — escalar contador
+            rcount = self._repeat_count.get(user_id, 0) + 1
+            self._repeat_count[user_id] = rcount
+            level = min(rcount, 3)
+            repeat_resp = pick(REPEAT_RESPONSES[level])
+            # Actualizar last_message (sigue siendo el mismo)
+            self._last_message[user_id] = message
+            return self._return(user_id, message, sentiment, repeat_resp,
+                                emotion, relationship_score, action="repeat")
+        else:
+            # Mensaje diferente — resetear contador
+            self._last_message[user_id]  = message
+            self._repeat_count[user_id]  = 0
 
         # PRIORIDAD 5 — Opinión / tema
         if agg_count == 0 and rec_needed == 0:

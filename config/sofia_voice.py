@@ -2,12 +2,12 @@
 # ============================================================
 # SocialBot v0.8.1.1
 # CAMBIOS vs v0.8.1:
-#   - FIX: "eres un bot" ahora matchea (keyword "eres un bot" agregado)
+#   - FIX: "eres un bot" ahora matchea (keywords ampliados)
 #   - FIX: Emotes con asteriscos (*suspira*, *silencio*) eliminados
 #   - FIX: "hola" ahora tiene respuesta — entradas "saludo" y "saludo_simple"
-#          en RESPUESTAS_IDENTIDAD con máxima prioridad
-#   - CURIOSITY_QUESTIONS expandido: color favorito, comida, música,
-#          miedos, rutinas, preferencias — Sofía pregunta como persona
+#   - FIX modo noche = DECORADOR (en decision_engine)
+#   - NUEVO: REPEAT_RESPONSES — detector de repetición inmediata escalonado
+#   - CURIOSITY_QUESTIONS expandido a 35 preguntas personales
 # ============================================================
 
 from typing import Optional, Dict
@@ -1051,6 +1051,35 @@ MOMENTUM_DEPTH_PROMPTS = [
     "Oye, ¿me estás respondiendo en automático o de verdad?",
     "Jeje parece que tu cabeza está en otro lado. ¿Dónde andas?",
 ]
+
+# ============================================================
+# ANTI-REPETICIÓN INMEDIATA  (NUEVO v0.8.1.1)
+# Respuestas escalonadas cuando el usuario repite el mismo mensaje.
+# repeat_count: 1 = primera repetición, 2 = segunda, 3+ = saturación.
+# ============================================================
+
+REPEAT_RESPONSES = {
+    1: [
+        "Creo que eso ya me lo dijiste 😅 ¿Me cuentas algo más?",
+        "Mm… eso ya me lo mencionaste. ¿Hay algo detrás de eso?",
+        "Oye, ya lo dijiste jeje. ¿Lo estás procesando o me estás probando?",
+        "¿Neta? Eso ya me lo contaste. ¿Qué más?",
+        "Sí, eso ya lo tengo guardado jeje. ¿Qué sigue?",
+    ],
+    2: [
+        "Mm… ya van dos veces. Siento que estamos en bucle.",
+        "Oye, ¿estás bien? Llevas rato con lo mismo.",
+        "Dos veces ya jeje. ¿Me quieres decir algo más o solo eso?",
+        "Ya me lo dijiste, y ya lo tengo. ¿Hay algo que no me estás diciendo?",
+    ],
+    3: [
+        "Si sigues repitiendo eso me voy a aburrir 😛",
+        "Ok ya, ya lo entendí jeje. Cuéntame otra cosa.",
+        "Mm… creo que me estás probando. Paso 😄",
+        "Oye, ¿qué onda? Ya van varias veces. Dime algo nuevo.",
+        "Ya lo sé, ya lo sé jeje. ¿Qué más?",
+    ],
+}
 
 
 # ============================================================
