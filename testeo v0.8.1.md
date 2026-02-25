@@ -18,7 +18,7 @@ LOG_DIR  = BASE_DIR / "logs"
 DATABASE_PATH = DATA_DIR / "bot_data.db"
 
 BOT_NAME = "SocialBot"
-VERSION  = "0.8.0"   # FIX: era "0.5.4" — desincronizado con el header
+VERSION  = "0.8.2"
 
 INITIAL_ENERGY = 50.0
 INITIAL_TRUST  = 50.0
@@ -77,6 +77,34 @@ SENTIMENT_BACKEND          = "basic"
 
 # ── Secrets reset diario (NUEVO v0.8.0) ──────────────────────────
 SECRETS_DAILY_RESET        = True   # Si True, secrets_revealed se resetea cada día
+
+# ── Memoria Semántica (NUEVO v0.8.2) ─────────────────────────────
+# Extrae hechos estructurados {tema: valor} de los mensajes del usuario.
+# Permite respuestas como "Sé que te gusta la pizza" en vez de buscar
+# frases exactas guardadas.
+SEMANTIC_FACTS_MAX         = 20     # máximo de hechos semánticos por usuario
+SEMANTIC_CONFIDENCE_MIN    = 0.6    # confianza mínima para guardar un hecho
+SEMANTIC_RECALL_ON_CHECK   = True   # activar recall automático en memory_check intent
+
+# ── Intent Classifier (NUEVO v0.8.2) ─────────────────────────────
+# Prioridad explícita: memory_check > identity > topic > fallback
+# Evita que un "te acuerdas de la pizza" dispare el topic_lock de comida.
+INTENT_PRIORITY = [
+    "memory_check",    # "¿recuerdas...?" / "¿te acuerdas...?" / "¿sabes algo de mí?"
+    "identity",        # "¿cómo te llamas?" / "eres un bot?" etc
+    "cuentame",        # "cuéntame algo" / "dime algo"
+    "direct_question", # preguntas concretas con respuesta directa
+    "opinion",         # temas con opinión registrada
+    "topic",           # topic lock
+    "fallback",        # respuesta base
+]
+
+# ── Cooldowns por tipo de output (NUEVO v0.8.2) ──────────────────
+# Evita que el mismo tipo de extensión se repita demasiado seguido.
+COOLDOWN_NIGHT_COMMENT     = 5      # mensajes mínimos entre comentarios nocturnos
+COOLDOWN_QUOTE_RECALL      = 8      # mensajes mínimos entre quote recalls
+COOLDOWN_CURIOSITY_Q       = 4      # mensajes mínimos entre preguntas de curiosidad
+COOLDOWN_SEMANTIC_RECALL   = 6      # mensajes mínimos entre recalls semánticos
 
 
 
@@ -1288,22 +1316,20 @@ def is_cuentame_trigger(message: str) -> bool:
     msg = _norm(message)
     return any(_norm(t) in msg for t in CUENTAME_TRIGGERS)
 
-
-
-    # core/decision_engine.py
+# core/decision_engine.py
 # ============================================================
-# SocialBot v0.8.1.1
-# CAMBIOS vs v0.8.1:
-#   - FIX modo noche = DECORADOR. Respuesta real primero, comentario nocturno
-#     opcional al final. _night_response → _night_comment.
-#   - NUEVO PRIORIDAD 4.7: anti-repetición inmediata. Si el usuario manda
-#     el mismo mensaje seguido → respuestas escalonadas (REPEAT_RESPONSES).
-#     Contador por usuario en RAM (_last_message, _repeat_count).
-#   - Los returns tempranos (identity, initiative, direct_answer) también
-#     resetean _last_message para que el tracker no quede desincronizado.
-#   - NOTA: añadir al !reset en discord_bot.py:
-#       decision._last_message.pop(user_id, None)
-#       decision._repeat_count.pop(user_id, None)
+# SocialBot v0.8.2
+# CAMBIOS vs v0.8.1.1:
+#   - FIX BUG-3: intent "memory_check" con prioridad sobre topic detector.
+#     "te acuerdas que me gusta la pizza" ya NO dispara topic comida.
+#   - FIX BUG-4: "¿recuerdas algo de mí?" consulta semantic_facts reales
+#     y responde con hechos concretos en vez de emoción genérica.
+#   - FIX BUG-5: modo noche decorador funciona con cooldown por usuario,
+#     no se repite en cada mensaje.
+#   - NUEVO: Intent classifier con cadena de prioridad explícita.
+#   - NUEVO: SemanticMemory — extrae {tema: valor} de mensajes y permite
+#     recalls precisos ("Sé que te gusta la pizza, ¿algo diferente hoy?")
+#   - NUEVO: Cooldown por tipo de output (night, quote, curiosity, semantic).
 # ============================================================
 
 from datetime import datetime, date
@@ -1334,6 +1360,176 @@ from config.sofia_voice import (
 )
 import random
 import time
+
+
+# ============================================================
+# SEMANTIC MEMORY v0.8.2
+# Extrae hechos estructurados {tema: valor} de los mensajes.
+# Permite recalls precisos en vez de buscar frases exactas.
+# ============================================================
+
+class SemanticMemory:
+    """
+    Detecta y almacena hechos del tipo {tema: valor} a partir del texto.
+    Ej: "me gusta la pizza" → {"comida_favorita": "pizza"}
+         "no tengo equipo de futbol" → {"futbol_tiene_equipo": "no"}
+    """
+
+    # Patrones de extracción: (regex_o_keywords, clave, extractor)
+    # Formato: lista de (lista_de_triggers, clave_semantica, valor_fijo_o_None)
+    # Si valor_fijo es None → extrae la palabra clave del topic_lock
+    EXTRACTION_RULES = [
+        # Comida
+        (["me gusta la pizza", "amo la pizza"],         "comida_favorita",      "pizza"),
+        (["me gustan los tacos", "amo los tacos"],      "comida_favorita",      "tacos"),
+        (["me gusta el sushi"],                         "comida_favorita",      "sushi"),
+        (["me gusta la hamburguesa", "me gustan las hamburguesas"], "comida_favorita", "hamburguesa"),
+        (["me gusta el ramen"],                         "comida_favorita",      "ramen"),
+        # Deportes
+        (["me gusta el futbol", "me encanta el futbol"],"deporte_interes",     "futbol"),
+        (["no tengo equipo", "no tengo equipo de futbol"], "futbol_tiene_equipo", "no"),
+        (["mi equipo es", "soy del"],                  "futbol_equipo",         None),   # valor dinámico
+        (["me gusta el basquetbol", "me gusta el basket"], "deporte_interes",  "basquetbol"),
+        # Música
+        (["me gusta la musica", "amo la musica"],       "musica_le_gusta",      "si"),
+        # Escuela/trabajo
+        (["estudio", "soy estudiante"],                 "ocupacion",            "estudiante"),
+        (["trabajo", "soy trabajador"],                 "ocupacion",            "trabajador"),
+        # Estado emocional frecuente
+        (["estoy bien", "todo bien"],                   "estado_general",       "bien"),
+        (["estoy mal", "no estoy bien"],                "estado_general",       "mal"),
+    ]
+
+    # Keywords que indican intención de verificar memoria
+    MEMORY_CHECK_TRIGGERS = [
+        "recuerdas", "te acuerdas", "sabes algo de mi", "sabes algo sobre mi",
+        "que sabes de mi", "qué sabes de mí", "recuerdas algo", "me conoces",
+        "que recuerdas", "qué recuerdas", "acordas", "ya te dije",
+        "te dije que", "te conte que", "te conté que",
+    ]
+
+    def __init__(self):
+        pass
+
+    def _normalize(self, text: str) -> str:
+        import unicodedata
+        nfkd = unicodedata.normalize("NFD", text)
+        return nfkd.encode("ascii", "ignore").decode("utf-8").lower().strip()
+
+    def is_memory_check(self, message: str) -> bool:
+        """Detecta si el usuario está preguntando si Sofía recuerda algo de él."""
+        msg = self._normalize(message)
+        return any(trigger in msg for trigger in self.MEMORY_CHECK_TRIGGERS)
+
+    def extract_facts(self, message: str) -> dict:
+        """
+        Extrae hechos del mensaje. Retorna dict {clave: valor} con los hechos encontrados.
+        Puede retornar dict vacío si no encuentra nada.
+        """
+        msg = self._normalize(message)
+        found = {}
+        for triggers, key, fixed_value in self.EXTRACTION_RULES:
+            for trigger in triggers:
+                if trigger in msg:
+                    if fixed_value is not None:
+                        found[key] = fixed_value
+                    else:
+                        # Extracción dinámica: tomar palabras después del trigger
+                        idx = msg.find(trigger)
+                        rest = msg[idx + len(trigger):].strip().split()
+                        if rest:
+                            found[key] = rest[0]
+                    break
+        return found
+
+    def build_recall_response(self, semantic_facts: dict, name: str) -> str:
+        """
+        Construye una respuesta de recall usando los hechos semánticos.
+        Si no hay hechos, retorna None para que el engine use fallback.
+        """
+        if not semantic_facts:
+            return None
+
+        # Priorizar hechos más "personales" primero
+        priority_keys = [
+            "comida_favorita", "deporte_interes", "futbol_tiene_equipo",
+            "futbol_equipo", "ocupacion", "musica_le_gusta", "estado_general",
+        ]
+
+        facts_text = []
+        for key in priority_keys:
+            val = semantic_facts.get(key)
+            if val:
+                fact = self._fact_to_human(key, val)
+                if fact:
+                    facts_text.append(fact)
+
+        # Agregar hechos no priorizados que queden
+        for key, val in semantic_facts.items():
+            if key not in priority_keys:
+                fact = self._fact_to_human(key, val)
+                if fact:
+                    facts_text.append(fact)
+
+        if not facts_text:
+            return None
+
+        if len(facts_text) == 1:
+            templates = [
+                f"Sí, recuerdo que {facts_text[0]}. ¿Por qué lo preguntas?",
+                f"Claro, sé que {facts_text[0]}. ¿Hay algo más que quieras que sepa?",
+                f"Mm… sí. Recuerdo que {facts_text[0]}.",
+            ]
+        else:
+            lista = ", ".join(facts_text[:-1]) + f" y {facts_text[-1]}"
+            templates = [
+                f"Bueno, recuerdo algunas cosas: {lista}. ¿Eso es lo que buscabas?",
+                f"Sé que {lista}. No es mucho, pero es lo que tengo jeje.",
+                f"Mm… {lista}. ¿Quieres contarme algo más?",
+            ]
+
+        return random.choice(templates)
+
+    def _fact_to_human(self, key: str, val: str) -> str:
+        """Convierte un par clave/valor semántico en lenguaje natural."""
+        mapping = {
+            "comida_favorita":     f"te gusta {val}",
+            "deporte_interes":     f"te interesa el {val}",
+            "futbol_tiene_equipo": ("no tienes equipo de fútbol" if val == "no" else f"tienes equipo de fútbol: {val}"),
+            "futbol_equipo":       f"eres del {val}",
+            "ocupacion":           f"eres {val}",
+            "musica_le_gusta":     "te gusta la música",
+            "estado_general":      f"generalmente estás {val}",
+        }
+        return mapping.get(key, f"{key}: {val}")
+
+
+# ============================================================
+# INTENT CLASSIFIER v0.8.2
+# Cadena de prioridad explícita para clasificar el mensaje.
+# Evita que "te acuerdas de la pizza" dispare topic_lock de comida.
+# ============================================================
+
+class IntentClassifier:
+    """
+    Clasifica el intent del mensaje según la cadena de prioridad definida
+    en settings.INTENT_PRIORITY. Retorna el intent de mayor prioridad.
+    """
+
+    def __init__(self, semantic_memory: SemanticMemory):
+        self.sem = semantic_memory
+
+    def classify(self, message: str) -> str:
+        """
+        Retorna el intent detectado. Posibles valores:
+        "memory_check", "identity", "cuentame", "direct_question",
+        "opinion", "topic", "fallback"
+        """
+        # memory_check es PRIORIDAD MÁXIMA — va antes que cualquier topic
+        if self.sem.is_memory_check(message):
+            return "memory_check"
+        # El resto se maneja en el priority resolver del engine
+        return "normal"
 
 
 # ============================================================
@@ -1472,6 +1668,8 @@ class DecisionEngine:
         self.analyzer            = TextAnalyzer()
         self.aggression_detector = AggressionDetector()
         self.topic_lock          = TopicLock()
+        self.semantic_memory     = SemanticMemory()          # NUEVO v0.8.2
+        self.intent_classifier   = IntentClassifier(self.semantic_memory)  # NUEVO v0.8.2
 
         self.thresholds = {
             "ignore":         -0.2,
@@ -1480,14 +1678,19 @@ class DecisionEngine:
         }
 
         self.secrets_revealed:  Dict[str, int]  = {}
-        self._secrets_date:     Dict[str, date]  = {}  # NUEVO: fecha de último reveal
+        self._secrets_date:     Dict[str, date]  = {}
         self.aggression_count:  Dict[str, int]  = {}
         self.recovery_needed:   Dict[str, int]  = {}
         self.short_streak:      Dict[str, int]  = {}
         self._topic_question_history: Dict[str, list] = {}
-        # NUEVO v0.8.1.1 — Anti-repetición inmediata
-        self._last_message:     Dict[str, str]  = {}   # último mensaje por usuario
-        self._repeat_count:     Dict[str, int]  = {}   # cuántas veces seguidas lo repitió
+        self._last_message:     Dict[str, str]  = {}
+        self._repeat_count:     Dict[str, int]  = {}
+
+        # NUEVO v0.8.2 — Cooldown por tipo de output
+        # Almacena el número de mensaje en que se usó cada tipo por última vez.
+        # {user_id: {"night": int, "quote": int, "curiosity": int, "semantic": int}}
+        self._output_cooldowns: Dict[str, Dict[str, int]] = {}
+        self._msg_counter:      Dict[str, int] = {}  # contador de mensajes por usuario
 
     # ============================================================
     # MÉTODO PRINCIPAL
@@ -1508,6 +1711,27 @@ class DecisionEngine:
 
         if profile_modifiers is None:
             profile_modifiers = {}
+
+        # ── Contador de mensajes por usuario (para cooldowns) ──
+        msg_n = self._msg_counter.get(user_id, 0) + 1
+        self._msg_counter[user_id] = msg_n
+
+        # ── Extracción semántica: aprender hechos de cada mensaje ──
+        # Se hace SIEMPRE, antes de clasificar el intent.
+        if profile is not None:
+            new_facts = self.semantic_memory.extract_facts(message)
+            if new_facts:
+                # Merge: los hechos nuevos sobreescriben los viejos del mismo tema
+                existing = getattr(profile, "semantic_facts", {}) or {}
+                existing.update(new_facts)
+                # Respetar máximo de hechos
+                max_facts = getattr(settings, "SEMANTIC_FACTS_MAX", 20)
+                if len(existing) > max_facts:
+                    # Eliminar los más antiguos (los primeros insertados)
+                    keys_to_remove = list(existing.keys())[:(len(existing) - max_facts)]
+                    for k in keys_to_remove:
+                        del existing[k]
+                profile.semantic_facts = existing
 
         name      = display_name
         sentiment = self.analyzer.analyze_sentiment(message)
@@ -1559,6 +1783,31 @@ class DecisionEngine:
         # PRIORITY RESOLVER
         # ════════════════════════════════════════════════════
 
+        # PRIORIDAD 0.5 — Memory check (NUEVO v0.8.2)
+        # "¿recuerdas algo de mí?" / "te acuerdas que me gusta la pizza?"
+        # Va ANTES de identity y ANTES de topic_lock para que nunca pierda
+        # ante el detector de temas (BUG-3 y BUG-4 corregidos aquí).
+        intent = self.intent_classifier.classify(message)
+        if intent == "memory_check":
+            self._last_message[user_id] = message
+            self._repeat_count[user_id] = 0
+            semantic_facts = getattr(profile, "semantic_facts", {}) if profile else {}
+            recall_resp = self.semantic_memory.build_recall_response(semantic_facts, name)
+            if recall_resp is None:
+                # No hay hechos guardados — respuesta honesta
+                no_memory_opts = [
+                    f"Mm… la verdad no tengo nada guardado de ti todavía, {name}. Cuéntame algo.",
+                    f"No recuerdo nada concreto aún. ¿Quieres que empiece a conocerte?",
+                    f"Todavía estoy aprendiendo quién eres, {name}. Dime algo sobre ti.",
+                ]
+                recall_resp = random.choice(no_memory_opts)
+            # Decorador nocturno aplica aquí también (BUG-5)
+            night_comment = self._get_night_comment_if_due(user_id, msg_n, emotion.trust, name, emotion_engine)
+            if night_comment:
+                recall_resp = f"{recall_resp} {night_comment}"
+            return self._return(user_id, message, sentiment, recall_resp,
+                                emotion, relationship_score, action="memory_check")
+
         # PRIORIDAD 1 — Identidad
         identity_response = detect_identity_question(message)
         if identity_response:
@@ -1577,12 +1826,10 @@ class DecisionEngine:
             return self._return(user_id, message, sentiment, thought,
                                 emotion, relationship_score, action="initiative")
 
-        # PRIORIDAD 2 — Modo noche (v0.8.1: DECORADOR, no reemplazo)
-        # El comentario nocturno se añade AL FINAL de la respuesta real, no la pisa.
-        # Se guarda aquí y se aplica después de generar la respuesta principal.
-        night_comment = None
-        if emotion_engine and emotion_engine.is_night_mode() and random.random() < 0.30:
-            night_comment = self._night_comment(emotion.trust, name)
+        # PRIORIDAD 2 — Modo noche (v0.8.2: DECORADOR con cooldown)
+        # El comentario nocturno se añade AL FINAL de la respuesta real.
+        # _get_night_comment_if_due verifica cooldown para no repetirse.
+        night_comment = self._get_night_comment_if_due(user_id, msg_n, emotion.trust, name, emotion_engine)
 
         # PRIORIDAD 3 — Ofensa activa
         aggression = self.aggression_detector.detect(message, trust=emotion.trust)
@@ -1742,12 +1989,13 @@ class DecisionEngine:
                 traits=traits,
                 important_quotes=important_quotes,
                 emotion_engine=emotion_engine,
+                msg_n=msg_n,
+                profile=profile,
             )
 
-        # PRIORIDAD 9 — Decorador nocturno (v0.8.1)
+        # PRIORIDAD 9 — Decorador nocturno (v0.8.2: con cooldown)
         # Se añade AL FINAL sin pisar la respuesta principal.
-        # Solo en respuestas normales, no en boundary/silence/identity.
-        if night_comment and action in ("respond", "direct_answer", "initiative", "opinion"):
+        if night_comment and action in ("respond", "direct_answer", "initiative", "opinion", "memory_check"):
             response = f"{response} {night_comment}"
 
         return self._return(user_id, message, sentiment, response,
@@ -1771,6 +2019,8 @@ class DecisionEngine:
         traits: dict,
         important_quotes: list = None,
         emotion_engine=None,
+        msg_n: int = 0,
+        profile=None,
     ) -> str:
         has_question = "?" in response
 
@@ -1781,17 +2031,43 @@ class DecisionEngine:
         if has_question:
             return response
 
-        # 7b — Quote recall (NUEVO v0.8.0)
+        # 7b — Recall semántico (NUEVO v0.8.2 — prioridad sobre quote recall)
+        # Usa hechos estructurados para mencionar algo específico del usuario.
+        semantic_cooldown = getattr(settings, "COOLDOWN_SEMANTIC_RECALL", 6)
+        semantic_facts = getattr(profile, "semantic_facts", {}) if profile else {}
+        if (
+            semantic_facts
+            and emotion.trust > 50
+            and self._cooldown_ok(user_id, "semantic", msg_n, semantic_cooldown)
+            and random.random() < 0.20
+        ):
+            # Elegir un hecho al azar para mencionar naturalmente
+            key = random.choice(list(semantic_facts.keys()))
+            val = semantic_facts[key]
+            fact_natural = self.semantic_memory._fact_to_human(key, val)
+            if fact_natural:
+                semantic_inserts = [
+                    f"Oye, recuerdo que {fact_natural}. ¿Cómo va eso?",
+                    f"A propósito… {fact_natural}, ¿verdad? jeje",
+                    f"Mm, recuerdo que {fact_natural}.",
+                ]
+                self._mark_cooldown(user_id, "semantic", msg_n)
+                return f"{response} {random.choice(semantic_inserts)}"
+
+        # 7c — Quote recall (v0.8.0, ahora con cooldown)
+        quote_cooldown = getattr(settings, "COOLDOWN_QUOTE_RECALL", 8)
         if (
             important_quotes
             and emotion.trust > 60
+            and self._cooldown_ok(user_id, "quote", msg_n, quote_cooldown)
             and random.random() < settings.QUOTE_RECALL_PROB
         ):
             quote = random.choice(important_quotes)
             frase = random.choice(QUOTE_RECALL_PHRASES).format(quote=quote)
+            self._mark_cooldown(user_id, "quote", msg_n)
             return f"{response} {frase}"
 
-        # 7c — Topic activo
+        # 7d — Topic activo
         if active_topic:
             history = self._topic_question_history.get(user_id, [])
             tq = self.topic_lock.get_topic_question(active_topic, history)
@@ -1800,15 +2076,18 @@ class DecisionEngine:
                 self._topic_question_history[user_id] = history[-5:]
                 return f"{response} {tq}"
 
-        # 7d — Curiosidad general
+        # 7e — Curiosidad general (ahora con cooldown)
+        curiosity_cooldown = getattr(settings, "COOLDOWN_CURIOSITY_Q", 4)
         if (
             "?" not in message
             and sentiment is not None and sentiment >= 0
             and emotion.trust >= settings.CURIOSITY_TRUST_MIN
             and traits.get("curiosity", 50) > 50
+            and self._cooldown_ok(user_id, "curiosity", msg_n, curiosity_cooldown)
             and random.random() < settings.CURIOSITY_TRIGGER_PROB
         ):
             question = self._contextual_question(keywords, sentiment, context)
+            self._mark_cooldown(user_id, "curiosity", msg_n)
             return f"{response} {question}"
 
         return response
@@ -1819,6 +2098,39 @@ class DecisionEngine:
 
     def _inject_name(self, text: str, name: str) -> str:
         return text.replace("{name}", name)
+
+    # ── Cooldown helpers (NUEVO v0.8.2) ──────────────────────────
+
+    def _cooldown_ok(self, user_id: str, output_type: str, current_msg_n: int, min_gap: int) -> bool:
+        """Retorna True si el cooldown para este tipo de output ya pasó."""
+        cd = self._output_cooldowns.setdefault(user_id, {})
+        last_used = cd.get(output_type, -999)
+        return (current_msg_n - last_used) >= min_gap
+
+    def _mark_cooldown(self, user_id: str, output_type: str, current_msg_n: int):
+        """Registra que este tipo de output se usó en el mensaje actual."""
+        self._output_cooldowns.setdefault(user_id, {})[output_type] = current_msg_n
+
+    def _get_night_comment_if_due(
+        self, user_id: str, msg_n: int, trust: float, name: str, emotion_engine
+    ) -> Optional[str]:
+        """
+        FIX BUG-5: Retorna comentario nocturno SOLO si:
+        1. Es modo noche.
+        2. Pasó el cooldown (COOLDOWN_NIGHT_COMMENT mensajes desde el último).
+        3. Random < 0.30.
+        Si retorna algo, registra el cooldown.
+        """
+        if not (emotion_engine and emotion_engine.is_night_mode()):
+            return None
+        cooldown = getattr(settings, "COOLDOWN_NIGHT_COMMENT", 5)
+        if not self._cooldown_ok(user_id, "night", msg_n, cooldown):
+            return None
+        if random.random() >= 0.30:
+            return None
+        comment = self._night_comment(trust, name)
+        self._mark_cooldown(user_id, "night", msg_n)
+        return comment
 
     def _night_comment(self, trust: float, name: str) -> Optional[str]:
         """
@@ -2095,7 +2407,7 @@ class DecisionEngine:
         return context
 
 
-# core/emotion_engine.py
+        # core/emotion_engine.py
 # ============================================================
 # SocialBot v0.8.0
 # FIX: Indentación rota del archivo original (emotion_engine estaba
@@ -2373,6 +2685,8 @@ PERSONALITY_CORE = {
     "depth": 65.0,             # tendencia a reflexionar
 }
 
+
+
 # core/session_manager.py
 # ============================================================
 # SocialBot v0.8.0
@@ -2574,6 +2888,7 @@ class SessionManager:
                 return parts[-1].strip()
 
         return fact
+
 
         # core/user_profile_manager.py
 # ============================================================
@@ -2910,7 +3225,7 @@ class UserProfileManager:
 
         return modifiers
 
-        # models/interaction.py
+# models/interaction.py
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -2949,7 +3264,9 @@ class Interaction:
             emotion_after=data["emotion_after"]
         )
 
-        # models/state.py
+
+
+# models/state.py
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
@@ -2985,6 +3302,7 @@ class EmotionalState:
             trust=data.get("trust", 50.0),
             last_updated=data.get("last_updated")
         )
+
         # models/user_profile.py
 # ============================================================
 # SocialBot v0.8.0
@@ -3026,6 +3344,11 @@ class UserProfile:
     # Lista de strings: las mejores/más reveladoras cosas que dijo
     important_quotes: List[str] = field(default_factory=list)
 
+    # NUEVO v0.8.2 — Memoria semántica estructurada {tema: valor}
+    # Ej: {"comida_favorita": "pizza", "deporte_interes": "futbol", "no_tiene_equipo": True}
+    # Permite recalls precisos: "Sé que te gusta la pizza, ¿quieres algo diferente hoy?"
+    semantic_facts: Dict[str, str] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
         return {
             "user_id": self.user_id,
@@ -3039,6 +3362,7 @@ class UserProfile:
             "important_facts": self.important_facts,
             "relationship_damage": self.relationship_damage,
             "important_quotes": self.important_quotes,  # NUEVO
+            "semantic_facts": self.semantic_facts,        # NUEVO v0.8.2
         }
 
     @classmethod
@@ -3074,6 +3398,11 @@ class UserProfile:
         if not isinstance(important_quotes, list):
             important_quotes = []
 
+        # NUEVO v0.8.2: cargar semantic_facts (retrocompatible — dict vacío si no existe)
+        semantic_facts = data.get("semantic_facts", {})
+        if not isinstance(semantic_facts, dict):
+            semantic_facts = {}
+
         return cls(
             user_id=data["user_id"],
             emotional_state=emotional_state,
@@ -3086,6 +3415,7 @@ class UserProfile:
             important_facts=important_facts,
             relationship_damage=relationship_damage,
             important_quotes=important_quotes,
+            semantic_facts=semantic_facts,
         )
 
         # storage/database.py
@@ -3389,7 +3719,6 @@ class Database:
                 "last_session_tone":  tone,
             }
 
-
             # utils/aggression_detector.py
 # ============================================================
 # SocialBot v0.8.0
@@ -3495,7 +3824,7 @@ class AggressionDetector:
         return {"detected": False, "level": None, "impact": None, "is_joke": False}
 
 
-       # utils/logger.py
+        # utils/logger.py
 import logging
 import sys
 from pathlib import Path
@@ -3919,6 +4248,10 @@ async def reset_cmd(ctx):
     decision.secrets_revealed.pop(user_id, None)
     decision._secrets_date.pop(user_id, None)          # NUEVO
     decision._topic_question_history.pop(user_id, None)
+
+    decision._output_cooldowns.pop(user_id, None)
+    decision._msg_counter.pop(user_id, None)
+    
     await ctx.send("🔄 Contadores reseteados.")
 
 
@@ -3951,4 +4284,3 @@ if __name__ == "__main__":
         print("❌ No encontré el token. Crea un .env con DISCORD_TOKEN=tu_token")
     else:
         bot.run(TOKEN)
-        

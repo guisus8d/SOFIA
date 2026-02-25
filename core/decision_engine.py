@@ -1,17 +1,15 @@
 # core/decision_engine.py
 # ============================================================
-# SocialBot v0.8.2
-# CAMBIOS vs v0.8.1.1:
-#   - FIX BUG-3: intent "memory_check" con prioridad sobre topic detector.
-#     "te acuerdas que me gusta la pizza" ya NO dispara topic comida.
-#   - FIX BUG-4: "¿recuerdas algo de mí?" consulta semantic_facts reales
-#     y responde con hechos concretos en vez de emoción genérica.
-#   - FIX BUG-5: modo noche decorador funciona con cooldown por usuario,
-#     no se repite en cada mensaje.
-#   - NUEVO: Intent classifier con cadena de prioridad explícita.
-#   - NUEVO: SemanticMemory — extrae {tema: valor} de mensajes y permite
-#     recalls precisos ("Sé que te gusta la pizza, ¿algo diferente hoy?")
-#   - NUEVO: Cooldown por tipo de output (night, quote, curiosity, semantic).
+# SocialBot v0.9.0
+# CAMBIOS vs v0.8.2:
+#   - FIX BUG: TopicLock consolidada — se importa desde sofia_voice,
+#     ya no hay dos instancias independientes en conflicto.
+#   - FIX BUG: _wrap() ya no añade recalls de hechos (evita doble recall).
+#   - NUEVO: _enrich_response() incluye lógica de Personalidad Viva.
+#     Sofía alterna entre compartir algo de sí misma y hacer preguntas.
+#   - NUEVO: _contextual_question() más rica, usa sofia_reaction_with_self.
+#   - NUEVO: _generate_response() puede añadir humor del día ocasionalmente.
+#   - MANTIENE: SemanticMemory, IntentClassifier, cooldowns (v0.8.2)
 # ============================================================
 
 from datetime import datetime, date
@@ -30,7 +28,7 @@ from config.sofia_voice import (
     RECOVERY_RESPONSES,
     CURIOSITY_QUESTIONS,
     MOMENTUM_DEPTH_PROMPTS,
-    REPEAT_RESPONSES,                # NUEVO v0.8.1.1
+    REPEAT_RESPONSES,
     get_opinion,
     OPINIONES,
     QUOTE_RECALL_PHRASES,
@@ -39,6 +37,10 @@ from config.sofia_voice import (
     detect_direct_question,
     get_sofia_thought,
     is_cuentame_trigger,
+    TopicLock,                     # FIX: importado desde sofia_voice (única instancia)
+    sofia_self_share,              # NUEVO v0.9.0
+    sofia_mood_expression,         # NUEVO v0.9.0
+    sofia_reaction_with_self,      # NUEVO v0.9.0
 )
 import random
 import time
@@ -46,43 +48,30 @@ import time
 
 # ============================================================
 # SEMANTIC MEMORY v0.8.2
-# Extrae hechos estructurados {tema: valor} de los mensajes.
-# Permite recalls precisos en vez de buscar frases exactas.
 # ============================================================
 
 class SemanticMemory:
     """
     Detecta y almacena hechos del tipo {tema: valor} a partir del texto.
-    Ej: "me gusta la pizza" → {"comida_favorita": "pizza"}
-         "no tengo equipo de futbol" → {"futbol_tiene_equipo": "no"}
     """
 
-    # Patrones de extracción: (regex_o_keywords, clave, extractor)
-    # Formato: lista de (lista_de_triggers, clave_semantica, valor_fijo_o_None)
-    # Si valor_fijo es None → extrae la palabra clave del topic_lock
     EXTRACTION_RULES = [
-        # Comida
-        (["me gusta la pizza", "amo la pizza"],         "comida_favorita",      "pizza"),
-        (["me gustan los tacos", "amo los tacos"],      "comida_favorita",      "tacos"),
-        (["me gusta el sushi"],                         "comida_favorita",      "sushi"),
-        (["me gusta la hamburguesa", "me gustan las hamburguesas"], "comida_favorita", "hamburguesa"),
-        (["me gusta el ramen"],                         "comida_favorita",      "ramen"),
-        # Deportes
-        (["me gusta el futbol", "me encanta el futbol"],"deporte_interes",     "futbol"),
-        (["no tengo equipo", "no tengo equipo de futbol"], "futbol_tiene_equipo", "no"),
-        (["mi equipo es", "soy del"],                  "futbol_equipo",         None),   # valor dinámico
-        (["me gusta el basquetbol", "me gusta el basket"], "deporte_interes",  "basquetbol"),
-        # Música
-        (["me gusta la musica", "amo la musica"],       "musica_le_gusta",      "si"),
-        # Escuela/trabajo
-        (["estudio", "soy estudiante"],                 "ocupacion",            "estudiante"),
-        (["trabajo", "soy trabajador"],                 "ocupacion",            "trabajador"),
-        # Estado emocional frecuente
-        (["estoy bien", "todo bien"],                   "estado_general",       "bien"),
-        (["estoy mal", "no estoy bien"],                "estado_general",       "mal"),
+        (["me gusta la pizza", "amo la pizza"],                       "comida_favorita",       "pizza"),
+        (["me gustan los tacos", "amo los tacos"],                    "comida_favorita",       "tacos"),
+        (["me gusta el sushi"],                                        "comida_favorita",       "sushi"),
+        (["me gusta la hamburguesa", "me gustan las hamburguesas"],   "comida_favorita",       "hamburguesa"),
+        (["me gusta el ramen"],                                        "comida_favorita",       "ramen"),
+        (["me gusta el futbol", "me encanta el futbol"],              "deporte_interes",       "futbol"),
+        (["no tengo equipo", "no tengo equipo de futbol"],            "futbol_tiene_equipo",   "no"),
+        (["mi equipo es", "soy del"],                                  "futbol_equipo",          None),
+        (["me gusta el basquetbol", "me gusta el basket"],            "deporte_interes",       "basquetbol"),
+        (["me gusta la musica", "amo la musica"],                     "musica_le_gusta",       "si"),
+        (["estudio", "soy estudiante"],                                "ocupacion",             "estudiante"),
+        (["trabajo", "soy trabajador"],                                "ocupacion",             "trabajador"),
+        (["estoy bien", "todo bien"],                                  "estado_general",        "bien"),
+        (["estoy mal", "no estoy bien"],                               "estado_general",        "mal"),
     ]
 
-    # Keywords que indican intención de verificar memoria
     MEMORY_CHECK_TRIGGERS = [
         "recuerdas", "te acuerdas", "sabes algo de mi", "sabes algo sobre mi",
         "que sabes de mi", "qué sabes de mí", "recuerdas algo", "me conoces",
@@ -99,15 +88,10 @@ class SemanticMemory:
         return nfkd.encode("ascii", "ignore").decode("utf-8").lower().strip()
 
     def is_memory_check(self, message: str) -> bool:
-        """Detecta si el usuario está preguntando si Sofía recuerda algo de él."""
         msg = self._normalize(message)
         return any(trigger in msg for trigger in self.MEMORY_CHECK_TRIGGERS)
 
     def extract_facts(self, message: str) -> dict:
-        """
-        Extrae hechos del mensaje. Retorna dict {clave: valor} con los hechos encontrados.
-        Puede retornar dict vacío si no encuentra nada.
-        """
         msg = self._normalize(message)
         found = {}
         for triggers, key, fixed_value in self.EXTRACTION_RULES:
@@ -116,7 +100,6 @@ class SemanticMemory:
                     if fixed_value is not None:
                         found[key] = fixed_value
                     else:
-                        # Extracción dinámica: tomar palabras después del trigger
                         idx = msg.find(trigger)
                         rest = msg[idx + len(trigger):].strip().split()
                         if rest:
@@ -125,14 +108,9 @@ class SemanticMemory:
         return found
 
     def build_recall_response(self, semantic_facts: dict, name: str) -> str:
-        """
-        Construye una respuesta de recall usando los hechos semánticos.
-        Si no hay hechos, retorna None para que el engine use fallback.
-        """
         if not semantic_facts:
             return None
 
-        # Priorizar hechos más "personales" primero
         priority_keys = [
             "comida_favorita", "deporte_interes", "futbol_tiene_equipo",
             "futbol_equipo", "ocupacion", "musica_le_gusta", "estado_general",
@@ -146,7 +124,6 @@ class SemanticMemory:
                 if fact:
                     facts_text.append(fact)
 
-        # Agregar hechos no priorizados que queden
         for key, val in semantic_facts.items():
             if key not in priority_keys:
                 fact = self._fact_to_human(key, val)
@@ -173,7 +150,6 @@ class SemanticMemory:
         return random.choice(templates)
 
     def _fact_to_human(self, key: str, val: str) -> str:
-        """Convierte un par clave/valor semántico en lenguaje natural."""
         mapping = {
             "comida_favorita":     f"te gusta {val}",
             "deporte_interes":     f"te interesa el {val}",
@@ -188,160 +164,20 @@ class SemanticMemory:
 
 # ============================================================
 # INTENT CLASSIFIER v0.8.2
-# Cadena de prioridad explícita para clasificar el mensaje.
-# Evita que "te acuerdas de la pizza" dispare topic_lock de comida.
 # ============================================================
 
 class IntentClassifier:
-    """
-    Clasifica el intent del mensaje según la cadena de prioridad definida
-    en settings.INTENT_PRIORITY. Retorna el intent de mayor prioridad.
-    """
-
     def __init__(self, semantic_memory: SemanticMemory):
         self.sem = semantic_memory
 
     def classify(self, message: str) -> str:
-        """
-        Retorna el intent detectado. Posibles valores:
-        "memory_check", "identity", "cuentame", "direct_question",
-        "opinion", "topic", "fallback"
-        """
-        # memory_check es PRIORIDAD MÁXIMA — va antes que cualquier topic
         if self.sem.is_memory_check(message):
             return "memory_check"
-        # El resto se maneja en el priority resolver del engine
         return "normal"
 
 
 # ============================================================
-# TOPIC LOCK (igual que v0.7.0, sin cambios)
-# ============================================================
-
-class TopicLock:
-    MIN_CONFIDENCE = 0.3
-    BOOST          = 0.15
-    DECAY          = 0.08
-    MAX_TURNS      = 12
-
-    TOPIC_KEYWORDS: Dict[str, list] = {
-        "dibujo":        ["dibujo", "dibujar", "ilustracion", "boceto", "lapiz", "pincel"],
-        "pintura":       ["pintura", "pintar", "acuarela", "oleo", "lienzo"],
-        "musica":        ["musica", "cancion", "cantar", "instrumento", "guitarra", "piano", "banda", "letra"],
-        "escritura":     ["escribir", "cuento", "historia", "poema", "novela", "texto", "escritura"],
-        "fotografia":    ["foto", "fotografia", "camara", "imagen", "retrato"],
-        "programacion":  ["codigo", "programa", "programar", "bug", "funcion", "python", "javascript", "api", "variable", "app"],
-        "videojuegos":   ["juego", "jugar", "minecraft", "fortnite", "roblox", "valorant", "gta", "zelda", "pokemon", "partida", "nivel"],
-        "anime":         ["anime", "manga", "otaku", "personaje", "saga", "temporada", "capitulo"],
-        "peliculas":     ["pelicula", "serie", "netflix", "ver", "cine", "actor", "directora"],
-        "libros":        ["libro", "leer", "novela", "autor", "lectura", "pagina"],
-        "futbol":        ["futbol", "gol", "partido", "equipo", "cancha", "jugador", "liga", "champions"],
-        "deportes":      ["deporte", "entrenar", "gimnasio", "correr", "natacion", "basquetbol"],
-        "escuela":       ["escuela", "clase", "maestro", "tarea", "examen", "universidad", "carrera", "estudiar"],
-        "trabajo":       ["trabajo", "jefe", "oficina", "sueldo", "proyecto", "cliente", "empresa"],
-        "familia":       ["familia", "mama", "papa", "hermano", "hermana", "abuelo", "abuela"],
-        "amigos":        ["amigo", "amiga", "fiesta", "salir", "banda", "cuate"],
-        "comida":        ["comer", "comida", "tacos", "pizza", "sushi", "hamburguesa", "ramen", "cocinar", "receta"],
-        "salud_mental":  ["ansioso", "deprimido", "triste", "estresado", "angustia", "ansiedad", "terapia"],
-        "relaciones":    ["novio", "novia", "pareja", "amor", "relacion", "ruptura", "cita", "besar"],
-    }
-
-    def __init__(self):
-        self._locks: Dict[str, dict] = {}
-
-    def _normalize(self, text: str) -> str:
-        import unicodedata
-        nfkd = unicodedata.normalize("NFD", text)
-        return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
-
-    def detect_topic(self, message: str) -> Optional[str]:
-        msg = self._normalize(message)
-        scores: Dict[str, int] = {}
-        for topic, keywords in self.TOPIC_KEYWORDS.items():
-            count = sum(1 for kw in keywords if kw in msg)
-            if count > 0:
-                scores[topic] = count
-        if not scores:
-            return None
-        return max(scores, key=scores.get)
-
-    def update(self, user_id: str, message: str) -> Optional[str]:
-        detected = self.detect_topic(message)
-        lock = self._locks.get(user_id)
-
-        if lock is None:
-            if detected:
-                self._locks[user_id] = {
-                    "name": detected, "confidence": 0.6,
-                    "turns": 1, "last_updated": time.time()
-                }
-                return detected
-            return None
-
-        if detected == lock["name"] or detected is None:
-            if detected == lock["name"]:
-                lock["confidence"] = min(1.0, lock["confidence"] + self.BOOST)
-            else:
-                lock["confidence"] = max(0.0, lock["confidence"] - self.DECAY * 0.5)
-        else:
-            lock["confidence"] = max(0.0, lock["confidence"] - self.DECAY)
-
-        lock["turns"] += 1
-        lock["last_updated"] = time.time()
-
-        if lock["confidence"] < self.MIN_CONFIDENCE or lock["turns"] > self.MAX_TURNS:
-            del self._locks[user_id]
-            if detected:
-                self._locks[user_id] = {
-                    "name": detected, "confidence": 0.6,
-                    "turns": 1, "last_updated": time.time()
-                }
-                return detected
-            return None
-
-        return lock["name"]
-
-    def get_active(self, user_id: str) -> Optional[str]:
-        lock = self._locks.get(user_id)
-        return lock["name"] if lock else None
-
-    def release(self, user_id: str):
-        self._locks.pop(user_id, None)
-
-    def get_topic_question(self, topic: str, previous_responses: list = None) -> Optional[str]:
-        TOPIC_QUESTIONS: Dict[str, list] = {
-            "dibujo":       ["¿Qué te gusta dibujar más?", "¿Los personajes los inventas tú?", "¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?"],
-            "pintura":      ["¿Qué técnica usas más?", "¿Mezclas colores a mano o digital?", "¿Tienes algún cuadro favorito propio?"],
-            "musica":       ["¿Tocas algo o solo escuchas?", "¿Qué género escuchas más?", "¿Tienes artista favorito?", "¿Compones algo propio?"],
-            "escritura":    ["¿Qué tipo de historias escribes?", "¿Tienes un personaje favorito de los tuyos?", "¿Escribes a mano o en computadora?"],
-            "fotografia":   ["¿Qué te gusta retratar más?", "¿Editas tus fotos?", "¿Usas cámara o celular?"],
-            "programacion": ["¿Qué estás construyendo?", "¿Qué lenguaje usas?", "¿Es proyecto personal o de trabajo?"],
-            "videojuegos":  ["¿Qué género te gusta más?", "¿Juegas solo o con alguien?", "¿Tienes un juego favorito de toda la vida?"],
-            "anime":        ["¿Tienes un favorito?", "¿Lo ves en español o japonés?", "¿Hay alguno que recomiendas?"],
-            "peliculas":    ["¿Qué género prefieres?", "¿Ves más series o películas?", "¿Tienes alguna favorita?"],
-            "libros":       ["¿Lees seguido?", "¿Qué género te gusta?", "¿Tienes un libro favorito?"],
-            "futbol":       ["¿Tienes equipo?", "¿Juegas o solo ves?", "¿Sigues alguna liga?"],
-            "deportes":     ["¿Practicas alguno?", "¿Prefieres verlos o jugarlos?", "¿Cuánto tiempo le dedicas?"],
-            "escuela":      ["¿Qué estudias?", "¿Cómo te va?", "¿Tienes materia favorita?"],
-            "trabajo":      ["¿En qué trabajas?", "¿Te gusta lo que haces?", "¿Llevas mucho tiempo ahí?"],
-            "familia":      ["¿Con quién vives?", "¿Te llevas bien con tu familia?"],
-            "amigos":       ["¿Sales seguido?", "¿Tienes un mejor amigo?"],
-            "comida":       ["¿Cocinas tú?", "¿Tienes platillo favorito?", "¿Qué no soportas comer?"],
-            "salud_mental": ["¿Cómo has estado?", "¿Hay algo que te esté pesando?"],
-            "relaciones":   ["¿Cómo van las cosas?", "¿Lo hablaste con alguien?"],
-        }
-        questions = TOPIC_QUESTIONS.get(topic, [])
-        if not questions:
-            return None
-        if previous_responses:
-            unused = [q for q in questions if q not in previous_responses]
-            if unused:
-                return random.choice(unused)
-        return random.choice(questions)
-
-
-# ============================================================
-# DECISION ENGINE v0.8.0
+# DECISION ENGINE v0.9.0
 # ============================================================
 
 class DecisionEngine:
@@ -349,9 +185,9 @@ class DecisionEngine:
     def __init__(self):
         self.analyzer            = TextAnalyzer()
         self.aggression_detector = AggressionDetector()
-        self.topic_lock          = TopicLock()
-        self.semantic_memory     = SemanticMemory()          # NUEVO v0.8.2
-        self.intent_classifier   = IntentClassifier(self.semantic_memory)  # NUEVO v0.8.2
+        self.topic_lock          = TopicLock()   # FIX: usa la clase importada de sofia_voice
+        self.semantic_memory     = SemanticMemory()
+        self.intent_classifier   = IntentClassifier(self.semantic_memory)
 
         self.thresholds = {
             "ignore":         -0.2,
@@ -368,11 +204,9 @@ class DecisionEngine:
         self._last_message:     Dict[str, str]  = {}
         self._repeat_count:     Dict[str, int]  = {}
 
-        # NUEVO v0.8.2 — Cooldown por tipo de output
-        # Almacena el número de mensaje en que se usó cada tipo por última vez.
-        # {user_id: {"night": int, "quote": int, "curiosity": int, "semantic": int}}
+        # Cooldown por tipo de output
         self._output_cooldowns: Dict[str, Dict[str, int]] = {}
-        self._msg_counter:      Dict[str, int] = {}  # contador de mensajes por usuario
+        self._msg_counter:      Dict[str, int] = {}
 
     # ============================================================
     # MÉTODO PRINCIPAL
@@ -386,30 +220,26 @@ class DecisionEngine:
         memory: Memory,
         profile_modifiers: Optional[dict] = None,
         display_name: str = "tú",
-        emotion_engine=None,     # NUEVO: para acceder a mood_reason e is_night_mode
-        profile_manager=None,    # NUEVO: para quote recall
-        profile=None,            # NUEVO: para quote recall
+        emotion_engine=None,
+        profile_manager=None,
+        profile=None,
     ) -> Dict[str, Any]:
 
         if profile_modifiers is None:
             profile_modifiers = {}
 
-        # ── Contador de mensajes por usuario (para cooldowns) ──
+        # ── Contador de mensajes por usuario ──
         msg_n = self._msg_counter.get(user_id, 0) + 1
         self._msg_counter[user_id] = msg_n
 
-        # ── Extracción semántica: aprender hechos de cada mensaje ──
-        # Se hace SIEMPRE, antes de clasificar el intent.
+        # ── Extracción semántica ──
         if profile is not None:
             new_facts = self.semantic_memory.extract_facts(message)
             if new_facts:
-                # Merge: los hechos nuevos sobreescriben los viejos del mismo tema
                 existing = getattr(profile, "semantic_facts", {}) or {}
                 existing.update(new_facts)
-                # Respetar máximo de hechos
                 max_facts = getattr(settings, "SEMANTIC_FACTS_MAX", 20)
                 if len(existing) > max_facts:
-                    # Eliminar los más antiguos (los primeros insertados)
                     keys_to_remove = list(existing.keys())[:(len(existing) - max_facts)]
                     for k in keys_to_remove:
                         del existing[k]
@@ -443,7 +273,6 @@ class DecisionEngine:
         streak     = self.short_streak.get(user_id, 0)
         is_apology = self.analyzer.is_apology(message)
 
-        # NUEVO: reset diario de secretos
         if settings.SECRETS_DAILY_RESET:
             self._daily_secrets_reset(user_id)
 
@@ -465,10 +294,7 @@ class DecisionEngine:
         # PRIORITY RESOLVER
         # ════════════════════════════════════════════════════
 
-        # PRIORIDAD 0.5 — Memory check (NUEVO v0.8.2)
-        # "¿recuerdas algo de mí?" / "te acuerdas que me gusta la pizza?"
-        # Va ANTES de identity y ANTES de topic_lock para que nunca pierda
-        # ante el detector de temas (BUG-3 y BUG-4 corregidos aquí).
+        # PRIORIDAD 0.5 — Memory check
         intent = self.intent_classifier.classify(message)
         if intent == "memory_check":
             self._last_message[user_id] = message
@@ -476,14 +302,12 @@ class DecisionEngine:
             semantic_facts = getattr(profile, "semantic_facts", {}) if profile else {}
             recall_resp = self.semantic_memory.build_recall_response(semantic_facts, name)
             if recall_resp is None:
-                # No hay hechos guardados — respuesta honesta
                 no_memory_opts = [
                     f"Mm… la verdad no tengo nada guardado de ti todavía, {name}. Cuéntame algo.",
                     f"No recuerdo nada concreto aún. ¿Quieres que empiece a conocerte?",
                     f"Todavía estoy aprendiendo quién eres, {name}. Dime algo sobre ti.",
                 ]
                 recall_resp = random.choice(no_memory_opts)
-            # Decorador nocturno aplica aquí también (BUG-5)
             night_comment = self._get_night_comment_if_due(user_id, msg_n, emotion.trust, name, emotion_engine)
             if night_comment:
                 recall_resp = f"{recall_resp} {night_comment}"
@@ -499,8 +323,7 @@ class DecisionEngine:
                                 self._inject_name(identity_response, name),
                                 emotion, relationship_score, action="identity")
 
-        # PRIORIDAD 1.5 — "Cuéntame algo" / iniciativa propia (NUEVO v0.8.1)
-        # Sofía responde con un pensamiento propio antes de cualquier otra lógica.
+        # PRIORIDAD 1.5 — "Cuéntame algo"
         if is_cuentame_trigger(message):
             self._last_message[user_id] = message
             self._repeat_count[user_id] = 0
@@ -508,9 +331,7 @@ class DecisionEngine:
             return self._return(user_id, message, sentiment, thought,
                                 emotion, relationship_score, action="initiative")
 
-        # PRIORIDAD 2 — Modo noche (v0.8.2: DECORADOR con cooldown)
-        # El comentario nocturno se añade AL FINAL de la respuesta real.
-        # _get_night_comment_if_due verifica cooldown para no repetirse.
+        # PRIORIDAD 2 — Modo noche (decorador con cooldown)
         night_comment = self._get_night_comment_if_due(user_id, msg_n, emotion.trust, name, emotion_engine)
 
         # PRIORIDAD 3 — Ofensa activa
@@ -560,14 +381,11 @@ class DecisionEngine:
             if rec_needed == 0:
                 self.aggression_count[user_id] = 0
 
-        # PRIORIDAD 4.5 — Pregunta directa concreta (NUEVO v0.8.1)
-        # Responde literal primero. Luego puede añadir personalidad.
-        # Aplica siempre, independiente del estado emocional.
+        # PRIORIDAD 4.5 — Pregunta directa concreta
         direct_answer = detect_direct_question(message)
         if direct_answer:
             self._last_message[user_id] = message
             self._repeat_count[user_id] = 0
-            # Toque de personalidad ocasional al final
             if random.random() < 0.4:
                 toques = [
                     " ¿Algo más que quieras saber?",
@@ -579,41 +397,37 @@ class DecisionEngine:
             return self._return(user_id, message, sentiment, direct_answer,
                                 emotion, relationship_score, action="direct_answer")
 
-        # PRIORIDAD 4.7 — Anti-repetición inmediata (NUEVO v0.8.1.1)
-        # Detecta si el usuario manda el mismo mensaje dos o más veces seguidas.
-        # Actúa ANTES de opinión/tema para que el bucle de pizza no se repita.
-        import unicodedata as _uc
+        # PRIORIDAD 4.7 — Anti-repetición inmediata
+        import unicodedata as _uc_local
         def _norm_msg(t: str) -> str:
-            return _uc.normalize("NFD", t.strip().lower()).encode("ascii", "ignore").decode()
+            return _uc_local.normalize("NFD", t.strip().lower()).encode("ascii", "ignore").decode()
 
-        msg_norm = _norm_msg(message)
+        msg_norm  = _norm_msg(message)
         last_norm = _norm_msg(self._last_message.get(user_id, ""))
 
         if msg_norm == last_norm and msg_norm:
-            # Mismo mensaje consecutivo — escalar contador
             rcount = self._repeat_count.get(user_id, 0) + 1
             self._repeat_count[user_id] = rcount
             level = min(rcount, 3)
             repeat_resp = pick(REPEAT_RESPONSES[level])
-            # Actualizar last_message (sigue siendo el mismo)
             self._last_message[user_id] = message
             return self._return(user_id, message, sentiment, repeat_resp,
                                 emotion, relationship_score, action="repeat")
         else:
-            # Mensaje diferente — resetear contador
             self._last_message[user_id]  = message
             self._repeat_count[user_id]  = 0
 
         # PRIORIDAD 5 — Opinión / tema
         if agg_count == 0 and rec_needed == 0:
-            opinion = get_opinion(message, name)
+            opinion = get_opinion(message, name, user_id)
             if opinion:
                 self.topic_lock.update(user_id, message)
                 return self._return(user_id, message, sentiment, opinion,
                                     emotion, relationship_score, action="opinion")
 
         # PRIORIDAD 6 — Topic activo
-        active_topic = self.topic_lock.update(user_id, message)
+        active_topic_result = self.topic_lock.update(user_id, message)
+        active_topic = active_topic_result[0] if isinstance(active_topic_result, tuple) else active_topic_result
 
         # PRIORIDAD 7 — Acción principal
         action         = "respond"
@@ -654,6 +468,7 @@ class DecisionEngine:
             relationship_score=relationship_score,
             name=name,
             is_humor=is_humor,
+            user_id=user_id,        # NUEVO v0.9.0
         )
 
         # PRIORIDAD 8 — Enriquecer
@@ -675,8 +490,7 @@ class DecisionEngine:
                 profile=profile,
             )
 
-        # PRIORIDAD 9 — Decorador nocturno (v0.8.2: con cooldown)
-        # Se añade AL FINAL sin pisar la respuesta principal.
+        # PRIORIDAD 9 — Decorador nocturno
         if night_comment and action in ("respond", "direct_answer", "initiative", "opinion", "memory_check"):
             response = f"{response} {night_comment}"
 
@@ -684,7 +498,7 @@ class DecisionEngine:
                             emotion, relationship_score, action=action)
 
     # ============================================================
-    # ENRIQUECIMIENTO
+    # ENRIQUECIMIENTO v0.9.0
     # ============================================================
 
     def _enrich_response(
@@ -713,8 +527,7 @@ class DecisionEngine:
         if has_question:
             return response
 
-        # 7b — Recall semántico (NUEVO v0.8.2 — prioridad sobre quote recall)
-        # Usa hechos estructurados para mencionar algo específico del usuario.
+        # 7b — Recall semántico
         semantic_cooldown = getattr(settings, "COOLDOWN_SEMANTIC_RECALL", 6)
         semantic_facts = getattr(profile, "semantic_facts", {}) if profile else {}
         if (
@@ -723,7 +536,6 @@ class DecisionEngine:
             and self._cooldown_ok(user_id, "semantic", msg_n, semantic_cooldown)
             and random.random() < 0.20
         ):
-            # Elegir un hecho al azar para mencionar naturalmente
             key = random.choice(list(semantic_facts.keys()))
             val = semantic_facts[key]
             fact_natural = self.semantic_memory._fact_to_human(key, val)
@@ -736,7 +548,7 @@ class DecisionEngine:
                 self._mark_cooldown(user_id, "semantic", msg_n)
                 return f"{response} {random.choice(semantic_inserts)}"
 
-        # 7c — Quote recall (v0.8.0, ahora con cooldown)
+        # 7c — Quote recall
         quote_cooldown = getattr(settings, "COOLDOWN_QUOTE_RECALL", 8)
         if (
             important_quotes
@@ -758,17 +570,34 @@ class DecisionEngine:
                 self._topic_question_history[user_id] = history[-5:]
                 return f"{response} {tq}"
 
-        # 7e — Curiosidad general (ahora con cooldown)
+        # ─────────────────────────────────────────────────────────────
+        # 7e — PERSONALIDAD VIVA (v0.9.0)
+        # Sofía alterna entre compartir algo de sí misma y hacer preguntas.
+        # ─────────────────────────────────────────────────────────────
+        persona_cooldown   = getattr(settings, "COOLDOWN_PERSONA_SHARE", 5)
         curiosity_cooldown = getattr(settings, "COOLDOWN_CURIOSITY_Q", 4)
+
         if (
             "?" not in message
             and sentiment is not None and sentiment >= 0
+            and emotion.trust >= settings.CURIOSITY_TRUST_MIN
+            and self._cooldown_ok(user_id, "persona", msg_n, persona_cooldown)
+            and random.random() < 0.35
+        ):
+            self._mark_cooldown(user_id, "persona", msg_n)
+            msg_count = self._msg_counter.get(user_id, 0)
+            share = sofia_self_share(emotion.trust, msg_count)
+            return f"{response} {share}"
+
+        elif (
+            "?" not in message
+            and sentiment is not None and sentiment >= -0.1
             and emotion.trust >= settings.CURIOSITY_TRUST_MIN
             and traits.get("curiosity", 50) > 50
             and self._cooldown_ok(user_id, "curiosity", msg_n, curiosity_cooldown)
             and random.random() < settings.CURIOSITY_TRIGGER_PROB
         ):
-            question = self._contextual_question(keywords, sentiment, context)
+            question = self._contextual_question(keywords, sentiment, context, emotion)
             self._mark_cooldown(user_id, "curiosity", msg_n)
             return f"{response} {question}"
 
@@ -781,28 +610,17 @@ class DecisionEngine:
     def _inject_name(self, text: str, name: str) -> str:
         return text.replace("{name}", name)
 
-    # ── Cooldown helpers (NUEVO v0.8.2) ──────────────────────────
-
     def _cooldown_ok(self, user_id: str, output_type: str, current_msg_n: int, min_gap: int) -> bool:
-        """Retorna True si el cooldown para este tipo de output ya pasó."""
         cd = self._output_cooldowns.setdefault(user_id, {})
         last_used = cd.get(output_type, -999)
         return (current_msg_n - last_used) >= min_gap
 
     def _mark_cooldown(self, user_id: str, output_type: str, current_msg_n: int):
-        """Registra que este tipo de output se usó en el mensaje actual."""
         self._output_cooldowns.setdefault(user_id, {})[output_type] = current_msg_n
 
     def _get_night_comment_if_due(
         self, user_id: str, msg_n: int, trust: float, name: str, emotion_engine
     ) -> Optional[str]:
-        """
-        FIX BUG-5: Retorna comentario nocturno SOLO si:
-        1. Es modo noche.
-        2. Pasó el cooldown (COOLDOWN_NIGHT_COMMENT mensajes desde el último).
-        3. Random < 0.30.
-        Si retorna algo, registra el cooldown.
-        """
         if not (emotion_engine and emotion_engine.is_night_mode()):
             return None
         cooldown = getattr(settings, "COOLDOWN_NIGHT_COMMENT", 5)
@@ -815,10 +633,6 @@ class DecisionEngine:
         return comment
 
     def _night_comment(self, trust: float, name: str) -> Optional[str]:
-        """
-        v0.8.1 — Comentario nocturno CORTO para añadir al final de la respuesta.
-        No reemplaza la respuesta, la decora.
-        """
         trust_high = trust > 70
         comentarios_high = [
             f"Por cierto {name}… ya es tarde, ¿no deberías descansar?",
@@ -836,7 +650,6 @@ class DecisionEngine:
         return pick(opciones)
 
     def _daily_secrets_reset(self, user_id: str):
-        """FIX: resetea secrets_revealed si cambió el día."""
         today = date.today()
         last_date = self._secrets_date.get(user_id)
         if last_date != today:
@@ -891,17 +704,40 @@ class DecisionEngine:
         else:
             return pick(RECOVERY_RESPONSES["phase_3"])
 
-    def _contextual_question(self, keywords: list, sentiment: float, context: dict) -> str:
+    def _contextual_question(
+        self,
+        keywords: list,
+        sentiment: float,
+        context: dict,
+        emotion: EmotionalState = None,
+    ) -> str:
+        # NUEVO v0.9.0: reacciones con algo de Sofía misma
+        if emotion and random.random() < getattr(settings, "SOFIA_REACTION_PROB", 0.25):
+            emo_val = emotion.primary_emotion.value if emotion else "neutral"
+            return sofia_reaction_with_self(emo_val)
+
         if sentiment > 0.5:
-            return pick(["¿Cómo te sientes con eso?", "¿Eso te hizo feliz?"])
+            return pick([
+                "¿Eso te hizo feliz de verdad?",
+                "Oye, ¿cómo te sentiste con eso?",
+                "¿Eso lo esperabas o fue sorpresa?",
+            ])
         if sentiment < -0.3:
-            return pick(["¿Estás bien?", "¿Cómo te dejó eso?"])
+            return pick([
+                "¿Estás bien?",
+                "¿Cómo te dejó eso?",
+                "¿Pudiste hablarlo con alguien?",
+            ])
         if context.get("repetition_level", 0) > 0:
-            return pick(["¿Qué quieres realmente decirme?", "¿Hay algo más detrás de eso?"])
+            return pick([
+                "¿Qué quieres realmente decirme?",
+                "¿Hay algo más detrás de eso?",
+                "Mm… siento que hay algo que no me estás diciendo.",
+            ])
         return pick(CURIOSITY_QUESTIONS)
 
     # ============================================================
-    # GENERACIÓN DE RESPUESTAS
+    # GENERACIÓN DE RESPUESTAS v0.9.0
     # ============================================================
 
     def _generate_response(
@@ -916,6 +752,7 @@ class DecisionEngine:
         relationship_score: float,
         name: str = "tú",
         is_humor: bool = False,
+        user_id: str = None,    # NUEVO v0.9.0
     ) -> str:
 
         trust_lvl = trust_level(emotion.trust)
@@ -940,14 +777,21 @@ class DecisionEngine:
         opciones      = emo_templates.get(trust_lvl, emo_templates.get("trust_mid", ["Mm…"]))
         base          = self._inject_name(pick(opciones), name)
 
-        # NUEVO: tono más juguetón si el usuario está en modo humor
         if is_humor and emotion.trust > 50:
-            humor_extras = [
-                "jeje", "😄", "ja", "qué bueno eso jeje",
-            ]
+            humor_extras = ["jeje", "😄", "ja", "qué bueno eso jeje"]
             base = base.rstrip() + f" {random.choice(humor_extras)}"
 
-        return self._wrap(base, energy, emotion.trust, context, important_facts, traits, empathy_bonus)
+        # NUEVO v0.9.0 — Humor del día (probabilidad baja, solo en estado neutral/feliz)
+        if (
+            user_id
+            and emo in ("neutral", "happy")
+            and emotion.trust > 40
+            and random.random() < getattr(settings, "SOFIA_MOOD_SHARE_PROB", 0.12)
+        ):
+            mood_expr = sofia_mood_expression(user_id)
+            base = f"{mood_expr} {base}"
+
+        return self._wrap(base, energy, emotion.trust, context, {}, traits, empathy_bonus)
 
     def _wrap(
         self,
@@ -971,14 +815,30 @@ class DecisionEngine:
             if ctx_phrase:
                 parts.append(ctx_phrase)
 
+        # FIX v0.9.0: _wrap ya NO añade fact recalls.
+        # Eso lo maneja _enrich_response con cooldowns.
+        # Solo añade MARCA_PERSONAL si hay sensibilidad alta.
         if energy > 60 and trust > 60:
-            extra = self._pick_extra(important_facts, traits, empathy_bonus)
+            extra = self._pick_extra_safe(traits, empathy_bonus)
             if extra:
                 parts.append(extra)
 
         return " ".join(p for p in parts if p)
 
+    def _pick_extra_safe(self, traits: dict, empathy_bonus: float) -> str:
+        """
+        FIX v0.9.0: Versión sin fact-recall para evitar doble recall.
+        Solo añade curiosidad o marca personal.
+        """
+        extras = []
+        if traits.get("curiosity", 50) > 55:
+            extras.append(pick(["¿Y luego qué pasó?", "Cuéntame más, ¿ok?"]))
+        if traits.get("sensitivity", 50) > 65 and empathy_bonus >= 0:
+            extras.append(pick(MARCA_PERSONAL))
+        return pick(extras) if extras else ""
+
     def _pick_context_phrase(self, context: Dict[str, Any]) -> str:
+        from config.sofia_voice import CONTEXTO
         if context.get("push_pull"):
             return pick(CONTEXTO["push_pull"])
         rep = context.get("repetition_level", 0)
@@ -990,19 +850,6 @@ class DecisionEngine:
             key = "swing_positivo" if context.get("swing_direction") == "positive" else "swing_negativo"
             return pick(CONTEXTO[key])
         return ""
-
-    def _pick_extra(self, important_facts: dict, traits: dict, empathy_bonus: float) -> str:
-        extras = []
-        if important_facts:
-            relevant = {k: v for k, v in important_facts.items() if v >= settings.FACT_WEIGHT_THRESHOLD}
-            if relevant:
-                top_fact = max(relevant, key=relevant.get)
-                extras.append(f"Oye, recuerdo que {top_fact}. ¿Cómo va eso?")
-        if traits.get("curiosity", 50) > 55:
-            extras.append(pick(["¿Y luego qué pasó?", "Cuéntame más, ¿ok?"]))
-        if traits.get("sensitivity", 50) > 65 and empathy_bonus >= 0:
-            extras.append(pick(MARCA_PERSONAL))
-        return pick(extras) if extras else ""
 
     def _get_secret(self) -> str:
         secrets = [

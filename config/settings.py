@@ -1,11 +1,10 @@
 # config/settings.py
 # ============================================================
-# SocialBot v0.8.0
-# CAMBIOS vs v0.6.2:
-#   - FIX: VERSION sincronizada con header (era 0.5.4)
-#   - NUEVO: Parámetros para memoria episódica (important_quotes)
-#   - NUEVO: Parámetros para modo noche
-#   - NUEVO: SENTIMENT_BACKEND para elegir entre basic/pysentimiento
+# SocialBot v0.9.0
+# CAMBIOS vs v0.8.2:
+#   - NUEVO: Parámetros para personalidad viva (COOLDOWN_PERSONA_SHARE,
+#     SOFIA_MOOD_SHARE_PROB, SOFIA_REACTION_PROB)
+#   - VERSION sincronizada a 0.9.0
 # ============================================================
 
 import os
@@ -18,7 +17,7 @@ LOG_DIR  = BASE_DIR / "logs"
 DATABASE_PATH = DATA_DIR / "bot_data.db"
 
 BOT_NAME = "SocialBot"
-VERSION  = "0.8.2"
+VERSION  = "0.9.0"
 
 INITIAL_ENERGY = 50.0
 INITIAL_TRUST  = 50.0
@@ -61,34 +60,31 @@ SHORT_RESPONSE_STREAK_MAX  = 3
 CURIOSITY_TRIGGER_PROB     = 0.30
 CURIOSITY_TRUST_MIN        = 50.0
 
-# ── Memoria Episódica (NUEVO v0.8.0) ─────────────────────────────
+# ── Memoria Episódica (v0.8.0) ────────────────────────────────────
 MAX_IMPORTANT_QUOTES       = 10    # máximo de frases memorables por usuario
 QUOTE_MIN_LENGTH           = 15    # longitud mínima para guardar una frase como memorable
 QUOTE_RECALL_PROB          = 0.15  # probabilidad de recordar una frase en respuesta
 
-# ── Modo Noche (NUEVO v0.8.0) ─────────────────────────────────────
+# ── Modo Noche (v0.8.0) ───────────────────────────────────────────
 NIGHT_MODE_START_HOUR      = 22    # hora en que inicia el modo noche (22:00)
 NIGHT_MODE_END_HOUR        = 6     # hora en que termina el modo noche (06:00)
 
-# ── Backend de Sentimiento (NUEVO v0.8.0) ─────────────────────────
+# ── Backend de Sentimiento (v0.8.0) ──────────────────────────────
 # Opciones: "basic" (palabras clave, sin dependencias)
 #           "pysentimiento" (modelo IA, requiere: pip install pysentimiento)
 SENTIMENT_BACKEND          = "basic"
 
-# ── Secrets reset diario (NUEVO v0.8.0) ──────────────────────────
+# ── Secrets reset diario (v0.8.0) ────────────────────────────────
 SECRETS_DAILY_RESET        = True   # Si True, secrets_revealed se resetea cada día
 
-# ── Memoria Semántica (NUEVO v0.8.2) ─────────────────────────────
+# ── Memoria Semántica (v0.8.2) ────────────────────────────────────
 # Extrae hechos estructurados {tema: valor} de los mensajes del usuario.
-# Permite respuestas como "Sé que te gusta la pizza" en vez de buscar
-# frases exactas guardadas.
 SEMANTIC_FACTS_MAX         = 20     # máximo de hechos semánticos por usuario
 SEMANTIC_CONFIDENCE_MIN    = 0.6    # confianza mínima para guardar un hecho
 SEMANTIC_RECALL_ON_CHECK   = True   # activar recall automático en memory_check intent
 
-# ── Intent Classifier (NUEVO v0.8.2) ─────────────────────────────
+# ── Intent Classifier (v0.8.2) ───────────────────────────────────
 # Prioridad explícita: memory_check > identity > topic > fallback
-# Evita que un "te acuerdas de la pizza" dispare el topic_lock de comida.
 INTENT_PRIORITY = [
     "memory_check",    # "¿recuerdas...?" / "¿te acuerdas...?" / "¿sabes algo de mí?"
     "identity",        # "¿cómo te llamas?" / "eres un bot?" etc
@@ -99,9 +95,16 @@ INTENT_PRIORITY = [
     "fallback",        # respuesta base
 ]
 
-# ── Cooldowns por tipo de output (NUEVO v0.8.2) ──────────────────
+# ── Cooldowns por tipo de output (v0.8.2) ────────────────────────
 # Evita que el mismo tipo de extensión se repita demasiado seguido.
 COOLDOWN_NIGHT_COMMENT     = 5      # mensajes mínimos entre comentarios nocturnos
 COOLDOWN_QUOTE_RECALL      = 8      # mensajes mínimos entre quote recalls
 COOLDOWN_CURIOSITY_Q       = 4      # mensajes mínimos entre preguntas de curiosidad
 COOLDOWN_SEMANTIC_RECALL   = 6      # mensajes mínimos entre recalls semánticos
+
+# ── Personalidad Viva (NUEVO v0.9.0) ─────────────────────────────
+# Sofía comparte algo de sí misma en vez de solo reaccionar al usuario.
+# Hace preguntas porque quiere saber, no solo por protocolo.
+COOLDOWN_PERSONA_SHARE     = 5      # mensajes mínimos entre auto-shares de Sofía
+SOFIA_MOOD_SHARE_PROB      = 0.12   # probabilidad de que Sofía mencione su humor al responder
+SOFIA_REACTION_PROB        = 0.25   # prob. de reacción con algo propio (en vez de solo preguntar)

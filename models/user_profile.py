@@ -1,15 +1,17 @@
 # models/user_profile.py
 # ============================================================
-# SocialBot v0.8.0
-# NUEVO: important_quotes — lista de frases memorables del usuario.
-#        Sofía puede citarlas: "Oye, una vez dijiste que..."
+# SocialBot v0.9.0
+# CAMBIOS vs v0.8.0:
+#   - FIX BUG: Import corregido de `core.personality_core` a
+#     `config.personality_core` (ruta real del módulo).
+#   - MANTIENE: important_quotes (v0.8.0), semantic_facts (v0.8.2)
 # ============================================================
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Dict
 from models.state import EmotionalState
-from core.personality_core import PERSONALITY_CORE
+from config.personality_core import PERSONALITY_CORE   # FIX: era core.personality_core
 
 RELATIONAL_TRAIT_KEYS = list(PERSONALITY_CORE.keys())
 
@@ -35,29 +37,26 @@ class UserProfile:
     # Daño relacional acumulado
     relationship_damage: float = 0.0
 
-    # NUEVO v0.8.0 — Frases memorables del usuario
-    # Lista de strings: las mejores/más reveladoras cosas que dijo
+    # v0.8.0 — Frases memorables del usuario
     important_quotes: List[str] = field(default_factory=list)
 
-    # NUEVO v0.8.2 — Memoria semántica estructurada {tema: valor}
-    # Ej: {"comida_favorita": "pizza", "deporte_interes": "futbol", "no_tiene_equipo": True}
-    # Permite recalls precisos: "Sé que te gusta la pizza, ¿quieres algo diferente hoy?"
+    # v0.8.2 — Memoria semántica estructurada {tema: valor}
     semantic_facts: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
-            "user_id": self.user_id,
-            "emotional_state": self.emotional_state.to_dict() if self.emotional_state else None,
-            "interaction_count": self.interaction_count,
+            "user_id":             self.user_id,
+            "emotional_state":     self.emotional_state.to_dict() if self.emotional_state else None,
+            "interaction_count":   self.interaction_count,
             "communication_style": self.communication_style,
-            "first_seen": self.first_seen.isoformat() if self.first_seen else None,
-            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
-            "topics": self.topics,
+            "first_seen":          self.first_seen.isoformat() if self.first_seen else None,
+            "last_seen":           self.last_seen.isoformat() if self.last_seen else None,
+            "topics":              self.topics,
             "personality_offsets": self.personality_offsets,
-            "important_facts": self.important_facts,
+            "important_facts":     self.important_facts,
             "relationship_damage": self.relationship_damage,
-            "important_quotes": self.important_quotes,  # NUEVO
-            "semantic_facts": self.semantic_facts,        # NUEVO v0.8.2
+            "important_quotes":    self.important_quotes,
+            "semantic_facts":      self.semantic_facts,
         }
 
     @classmethod
@@ -88,12 +87,11 @@ class UserProfile:
 
         relationship_damage = data.get("relationship_damage", 0.0)
 
-        # NUEVO: cargar important_quotes (retrocompatible)
         important_quotes = data.get("important_quotes", [])
         if not isinstance(important_quotes, list):
             important_quotes = []
 
-        # NUEVO v0.8.2: cargar semantic_facts (retrocompatible — dict vacío si no existe)
+        # v0.8.2: semantic_facts (retrocompatible)
         semantic_facts = data.get("semantic_facts", {})
         if not isinstance(semantic_facts, dict):
             semantic_facts = {}
