@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Dict
 from models.state import EmotionalState
-from config.personality_core import PERSONALITY_CORE   # FIX: era core.personality_core
+from core.personality_core import PERSONALITY_CORE
 
 RELATIONAL_TRAIT_KEYS = list(PERSONALITY_CORE.keys())
 
