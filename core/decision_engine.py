@@ -1,15 +1,14 @@
 # core/decision_engine.py
 # ============================================================
-# SocialBot v0.9.0
-# CAMBIOS vs v0.8.2:
-#   - FIX BUG: TopicLock consolidada — se importa desde sofia_voice,
-#     ya no hay dos instancias independientes en conflicto.
-#   - FIX BUG: _wrap() ya no añade recalls de hechos (evita doble recall).
-#   - NUEVO: _enrich_response() incluye lógica de Personalidad Viva.
-#     Sofía alterna entre compartir algo de sí misma y hacer preguntas.
-#   - NUEVO: _contextual_question() más rica, usa sofia_reaction_with_self.
-#   - NUEVO: _generate_response() puede añadir humor del día ocasionalmente.
-#   - MANTIENE: SemanticMemory, IntentClassifier, cooldowns (v0.8.2)
+# SocialBot v0.9.1
+# CAMBIOS vs v0.9.0:
+#   - FIX BUG CRÍTICO: TopicLock — ahora se importa la INSTANCIA global
+#     (_topic_lock) de sofia_voice, no la clase. Antes se creaban dos
+#     objetos separados: get_opinion() usaba uno y DecisionEngine otro,
+#     provocando que el seguimiento de temas se desincronizara.
+#   - FIX: eliminado self.topic_lock.update() duplicado en PRIORIDAD 5.
+#     get_opinion() ya llama internamente a _topic_lock.update().
+#   - MANTIENE: todo lo demás de v0.9.0
 # ============================================================
 
 from datetime import datetime, date
@@ -37,10 +36,10 @@ from config.sofia_voice import (
     detect_direct_question,
     get_sofia_thought,
     is_cuentame_trigger,
-    TopicLock,                     # FIX: importado desde sofia_voice (única instancia)
-    sofia_self_share,              # NUEVO v0.9.0
-    sofia_mood_expression,         # NUEVO v0.9.0
-    sofia_reaction_with_self,      # NUEVO v0.9.0
+    _topic_lock,                   # FIX v0.9.1: instancia global, no la clase
+    sofia_self_share,
+    sofia_mood_expression,
+    sofia_reaction_with_self,
 )
 import random
 import time
@@ -103,7 +102,8 @@ class SemanticMemory:
                         idx = msg.find(trigger)
                         rest = msg[idx + len(trigger):].strip().split()
                         if rest:
-                            found[key] = rest[0]
+                            # FIX: captura hasta 3 palabras para nombres compuestos
+                            found[key] = " ".join(rest[:3])
                     break
         return found
 
@@ -177,7 +177,7 @@ class IntentClassifier:
 
 
 # ============================================================
-# DECISION ENGINE v0.9.0
+# DECISION ENGINE v0.9.1
 # ============================================================
 
 class DecisionEngine:
@@ -185,7 +185,7 @@ class DecisionEngine:
     def __init__(self):
         self.analyzer            = TextAnalyzer()
         self.aggression_detector = AggressionDetector()
-        self.topic_lock          = TopicLock()   # FIX: usa la clase importada de sofia_voice
+        self.topic_lock          = _topic_lock   # FIX v0.9.1: instancia global compartida con get_opinion()
         self.semantic_memory     = SemanticMemory()
         self.intent_classifier   = IntentClassifier(self.semantic_memory)
 
@@ -418,10 +418,11 @@ class DecisionEngine:
             self._repeat_count[user_id]  = 0
 
         # PRIORIDAD 5 — Opinión / tema
+        # FIX v0.9.1: eliminado self.topic_lock.update() duplicado.
+        # get_opinion() ya llama internamente a _topic_lock.update().
         if agg_count == 0 and rec_needed == 0:
             opinion = get_opinion(message, name, user_id)
             if opinion:
-                self.topic_lock.update(user_id, message)
                 return self._return(user_id, message, sentiment, opinion,
                                     emotion, relationship_score, action="opinion")
 
@@ -430,7 +431,7 @@ class DecisionEngine:
         active_topic = active_topic_result[0] if isinstance(active_topic_result, tuple) else active_topic_result
 
         # PRIORIDAD 7 — Acción principal
-        action         = "respond"
+        action          = "respond"
         special_content = None
         secret_blocked  = rec_needed > 0 or agg_count > 0
 
@@ -468,7 +469,7 @@ class DecisionEngine:
             relationship_score=relationship_score,
             name=name,
             is_humor=is_humor,
-            user_id=user_id,        # NUEVO v0.9.0
+            user_id=user_id,
         )
 
         # PRIORIDAD 8 — Enriquecer
@@ -752,7 +753,7 @@ class DecisionEngine:
         relationship_score: float,
         name: str = "tú",
         is_humor: bool = False,
-        user_id: str = None,    # NUEVO v0.9.0
+        user_id: str = None,
     ) -> str:
 
         trust_lvl = trust_level(emotion.trust)
@@ -781,7 +782,7 @@ class DecisionEngine:
             humor_extras = ["jeje", "😄", "ja", "qué bueno eso jeje"]
             base = base.rstrip() + f" {random.choice(humor_extras)}"
 
-        # NUEVO v0.9.0 — Humor del día (probabilidad baja, solo en estado neutral/feliz)
+        # Humor del día (probabilidad baja, solo en estado neutral/feliz)
         if (
             user_id
             and emo in ("neutral", "happy")
@@ -815,9 +816,6 @@ class DecisionEngine:
             if ctx_phrase:
                 parts.append(ctx_phrase)
 
-        # FIX v0.9.0: _wrap ya NO añade fact recalls.
-        # Eso lo maneja _enrich_response con cooldowns.
-        # Solo añade MARCA_PERSONAL si hay sensibilidad alta.
         if energy > 60 and trust > 60:
             extra = self._pick_extra_safe(traits, empathy_bonus)
             if extra:
@@ -826,10 +824,6 @@ class DecisionEngine:
         return " ".join(p for p in parts if p)
 
     def _pick_extra_safe(self, traits: dict, empathy_bonus: float) -> str:
-        """
-        FIX v0.9.0: Versión sin fact-recall para evitar doble recall.
-        Solo añade curiosidad o marca personal.
-        """
         extras = []
         if traits.get("curiosity", 50) > 55:
             extras.append(pick(["¿Y luego qué pasó?", "Cuéntame más, ¿ok?"]))

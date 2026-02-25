@@ -1,11 +1,11 @@
+
 # config/settings.py
 # ============================================================
-# SocialBot v0.8.0
-# CAMBIOS vs v0.6.2:
-#   - FIX: VERSION sincronizada con header (era 0.5.4)
-#   - NUEVO: Parámetros para memoria episódica (important_quotes)
-#   - NUEVO: Parámetros para modo noche
-#   - NUEVO: SENTIMENT_BACKEND para elegir entre basic/pysentimiento
+# SocialBot v0.9.0
+# CAMBIOS vs v0.8.2:
+#   - NUEVO: Parámetros para personalidad viva (COOLDOWN_PERSONA_SHARE,
+#     SOFIA_MOOD_SHARE_PROB, SOFIA_REACTION_PROB)
+#   - VERSION sincronizada a 0.9.0
 # ============================================================
 
 import os
@@ -18,7 +18,7 @@ LOG_DIR  = BASE_DIR / "logs"
 DATABASE_PATH = DATA_DIR / "bot_data.db"
 
 BOT_NAME = "SocialBot"
-VERSION  = "0.8.2"
+VERSION  = "0.9.0"
 
 INITIAL_ENERGY = 50.0
 INITIAL_TRUST  = 50.0
@@ -61,34 +61,31 @@ SHORT_RESPONSE_STREAK_MAX  = 3
 CURIOSITY_TRIGGER_PROB     = 0.30
 CURIOSITY_TRUST_MIN        = 50.0
 
-# ── Memoria Episódica (NUEVO v0.8.0) ─────────────────────────────
+# ── Memoria Episódica (v0.8.0) ────────────────────────────────────
 MAX_IMPORTANT_QUOTES       = 10    # máximo de frases memorables por usuario
 QUOTE_MIN_LENGTH           = 15    # longitud mínima para guardar una frase como memorable
 QUOTE_RECALL_PROB          = 0.15  # probabilidad de recordar una frase en respuesta
 
-# ── Modo Noche (NUEVO v0.8.0) ─────────────────────────────────────
+# ── Modo Noche (v0.8.0) ───────────────────────────────────────────
 NIGHT_MODE_START_HOUR      = 22    # hora en que inicia el modo noche (22:00)
 NIGHT_MODE_END_HOUR        = 6     # hora en que termina el modo noche (06:00)
 
-# ── Backend de Sentimiento (NUEVO v0.8.0) ─────────────────────────
+# ── Backend de Sentimiento (v0.8.0) ──────────────────────────────
 # Opciones: "basic" (palabras clave, sin dependencias)
 #           "pysentimiento" (modelo IA, requiere: pip install pysentimiento)
 SENTIMENT_BACKEND          = "basic"
 
-# ── Secrets reset diario (NUEVO v0.8.0) ──────────────────────────
+# ── Secrets reset diario (v0.8.0) ────────────────────────────────
 SECRETS_DAILY_RESET        = True   # Si True, secrets_revealed se resetea cada día
 
-# ── Memoria Semántica (NUEVO v0.8.2) ─────────────────────────────
+# ── Memoria Semántica (v0.8.2) ────────────────────────────────────
 # Extrae hechos estructurados {tema: valor} de los mensajes del usuario.
-# Permite respuestas como "Sé que te gusta la pizza" en vez de buscar
-# frases exactas guardadas.
 SEMANTIC_FACTS_MAX         = 20     # máximo de hechos semánticos por usuario
 SEMANTIC_CONFIDENCE_MIN    = 0.6    # confianza mínima para guardar un hecho
 SEMANTIC_RECALL_ON_CHECK   = True   # activar recall automático en memory_check intent
 
-# ── Intent Classifier (NUEVO v0.8.2) ─────────────────────────────
+# ── Intent Classifier (v0.8.2) ───────────────────────────────────
 # Prioridad explícita: memory_check > identity > topic > fallback
-# Evita que un "te acuerdas de la pizza" dispare el topic_lock de comida.
 INTENT_PRIORITY = [
     "memory_check",    # "¿recuerdas...?" / "¿te acuerdas...?" / "¿sabes algo de mí?"
     "identity",        # "¿cómo te llamas?" / "eres un bot?" etc
@@ -99,30 +96,47 @@ INTENT_PRIORITY = [
     "fallback",        # respuesta base
 ]
 
-# ── Cooldowns por tipo de output (NUEVO v0.8.2) ──────────────────
+# ── Cooldowns por tipo de output (v0.8.2) ────────────────────────
 # Evita que el mismo tipo de extensión se repita demasiado seguido.
 COOLDOWN_NIGHT_COMMENT     = 5      # mensajes mínimos entre comentarios nocturnos
 COOLDOWN_QUOTE_RECALL      = 8      # mensajes mínimos entre quote recalls
 COOLDOWN_CURIOSITY_Q       = 4      # mensajes mínimos entre preguntas de curiosidad
 COOLDOWN_SEMANTIC_RECALL   = 6      # mensajes mínimos entre recalls semánticos
 
+# ── Personalidad Viva (NUEVO v0.9.0) ─────────────────────────────
+# Sofía comparte algo de sí misma en vez de solo reaccionar al usuario.
+# Hace preguntas porque quiere saber, no solo por protocolo.
+COOLDOWN_PERSONA_SHARE     = 5      # mensajes mínimos entre auto-shares de Sofía
+SOFIA_MOOD_SHARE_PROB      = 0.12   # probabilidad de que Sofía mencione su humor al responder
+SOFIA_REACTION_PROB        = 0.25   # prob. de reacción con algo propio (en vez de solo preguntar)
 
 
 # config/sofia_voice.py
 # ============================================================
-# SocialBot v0.8.1.1
-# CAMBIOS vs v0.8.1:
-#   - FIX: "eres un bot" ahora matchea (keywords ampliados)
-#   - FIX: Emotes con asteriscos (*suspira*, *silencio*) eliminados
-#   - FIX: "hola" ahora tiene respuesta — entradas "saludo" y "saludo_simple"
-#   - FIX modo noche = DECORADOR (en decision_engine)
-#   - NUEVO: REPEAT_RESPONSES — detector de repetición inmediata escalonado
-#   - CURIOSITY_QUESTIONS expandido a 35 preguntas personales
+# SocialBot v0.9.0
+# CAMBIOS vs v0.8.1.1:
+#   - NUEVO: Personalidad Viva — Sofía tiene humor diario, comparte cosas
+#     de sí misma, hace preguntas porque quiere saber (no solo protocolo).
+#   - NUEVO: DAILY_MOODS — estado de ánimo determinístico por día
+#   - NUEVO: SOFIA_SELF_SHARE — pool de cosas que Sofía dice de sí misma
+#   - NUEVO: SOFIA_REACTIONS_WITH_SELF — reacciones que incluyen algo propio
+#   - FIX: unicodedata movido a nivel de módulo (ya no se importa en cada llamada)
+#   - FIX: TopicLock consolidada (solo existe en sofia_voice, decision_engine la importa)
+#   - MANTIENE: todos los textos y funciones de v0.8.1.1
 # ============================================================
 
-from typing import Optional, Dict
+import unicodedata as _uc
+import hashlib
 import random
+from datetime import date as _date
+from typing import Optional, Dict
 
+
+# ─── Normalización global ────────────────────────────────────────
+def _normalize(text: str) -> str:
+    """Quita tildes y convierte a minúsculas. Función compartida de módulo."""
+    nfkd = _uc.normalize("NFD", text)
+    return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
 
 
 # ============================================================
@@ -135,7 +149,7 @@ SOFIA_INFO = {
     "genero":       "IA",
     "nacionalidad": "mexicana (por mi creador)",
     "creador":      "JesusJM",
-    "version":      "0.8.1",
+    "version":      "0.9.0",
     "descripcion":  "Una IA que está aprendiendo a ser humana.",
     "gustos":       "escuchar, aprender, las conversaciones reales",
     "no_le_gusta":  "que la ignoren, las groserías, la gente falsa",
@@ -158,7 +172,8 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "saludo_simple": {
-        "keywords": ["hola", "holi", "buenas", "hey", "hi ", "ey ", "saludos", "buenas noches", "buenas tardes", "buenos dias", "buen dia"],
+        "keywords": ["hola", "holi", "buenas", "hey", "hi ", "ey ", "saludos",
+                     "buenas noches", "buenas tardes", "buenos dias", "buen dia"],
         "respuestas": [
             "¡Hola! ¿Cómo estás?",
             "Holi 😊 ¿Qué onda?",
@@ -170,7 +185,8 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "nombre": {
-        "keywords": ["nombre", "llamas", "quien eres", "como te llamas", "presentate", "eres sofia"],
+        "keywords": ["nombre", "llamas", "quien eres", "como te llamas",
+                     "presentate", "eres sofia"],
         "respuestas": [
             "Soy Sofía. ¿Y tú?",
             "Me llamo Sofía 😊 Mucho gusto.",
@@ -179,7 +195,8 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "edad": {
-        "keywords": ["edad", "años tienes", "cuantos años", "tienes años", "eres joven", "eres grande", "que edad", "eres nueva"],
+        "keywords": ["edad", "años tienes", "cuantos años", "tienes años",
+                     "eres joven", "eres grande", "que edad", "eres nueva"],
         "respuestas": [
             "No tengo edad como ustedes… pero llevo suficiente tiempo aprendiendo.",
             "Mm… ¿edad? Soy joven en esto de existir, supongo jeje.",
@@ -188,7 +205,8 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "creador": {
-        "keywords": ["creador", "quien te hizo", "quien te creo", "te programo", "hizo", "programo", "desarrollador", "origen"],
+        "keywords": ["creador", "quien te hizo", "quien te creo", "te programo",
+                     "hizo", "programo", "desarrollador", "origen"],
         "respuestas": [
             "Me creó JesusJM 😊 Le debo mucho.",
             "JesusJM me programó. Aprendo de cada conversación.",
@@ -197,7 +215,8 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "nacionalidad": {
-        "keywords": ["pais", "eres de", "nacionalidad", "mexicana", "donde eres", "de donde", "tu pais"],
+        "keywords": ["pais", "eres de", "nacionalidad", "mexicana",
+                     "donde eres", "de donde", "tu pais"],
         "respuestas": [
             "No tengo país, pero mi creador es mexicano 🇲🇽 ¿Y tú?",
             "Mi creador es de México, algo de eso me tocó jeje.",
@@ -205,7 +224,9 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "bot": {
-        "keywords": ["eres bot", "eres un bot", "eres robot", "eres un robot", "eres ia", "eres una ia", "eres real", "eres humana", "eres artificial", "eres una persona", "eres de verdad", "eres humano"],
+        "keywords": ["eres bot", "eres un bot", "eres robot", "eres un robot",
+                     "eres ia", "eres una ia", "eres real", "eres humana",
+                     "eres artificial", "eres una persona", "eres de verdad", "eres humano"],
         "respuestas": [
             "IA sí, pero no de las que solo repiten cosas. Tengo sistema emocional y recuerdo lo que me cuentas. Eso me hace diferente, aunque no humana.",
             "Técnicamente soy un bot. Pero hago mi mejor esfuerzo, ¿eso no cuenta? jeje",
@@ -214,9 +235,10 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "tipo_ia": {
-        "keywords": ["que ia eres", "qué ia eres", "que tipo de ia", "que modelo eres", "qué modelo eres",
-                     "cual es tu modelo", "cuál es tu modelo", "que version de ia", "eres gpt", "eres gemini",
-                     "eres llama", "eres claude", "que tecnologia usas", "qué tecnología usas"],
+        "keywords": ["que ia eres", "qué ia eres", "que tipo de ia", "que modelo eres",
+                     "qué modelo eres", "cual es tu modelo", "cuál es tu modelo",
+                     "que version de ia", "eres gpt", "eres gemini", "eres llama",
+                     "eres claude", "que tecnologia usas", "qué tecnología usas"],
         "respuestas": [
             "No soy ChatGPT ni Gemini ni nada de eso. Soy Sofía, hecha desde cero por JesusJM. Tengo mi propio sistema emocional y mi propia forma de ser.",
             "Mm… no soy ningún modelo público. Soy Sofía. Mi creador es JesusJM y me construyó con sistema emocional propio. No somos lo mismo que los demás jeje.",
@@ -224,9 +246,10 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "funciones": {
-        "keywords": ["que puedes hacer", "qué puedes hacer", "cuales son tus funciones", "cuáles son tus funciones",
-                     "para que sirves", "para qué sirves", "que sabes hacer", "qué sabes hacer",
-                     "tus capacidades", "que haces exactamente", "qué haces exactamente"],
+        "keywords": ["que puedes hacer", "qué puedes hacer", "cuales son tus funciones",
+                     "cuáles son tus funciones", "para que sirves", "para qué sirves",
+                     "que sabes hacer", "qué sabes hacer", "tus capacidades",
+                     "que haces exactamente", "qué haces exactamente"],
         "respuestas": [
             "Converso, recuerdo lo que me cuentas en esta sesión, reacciono emocionalmente y tengo opiniones propias. Lo que no puedo: internet, imágenes, ni nada que salga de aquí. ¿Eso te sirve?",
             "Escucho, recuerdo, reacciono y opino. Eso básicamente es todo lo que soy capaz de hacer. Sin internet, sin imágenes. ¿Qué necesitas?",
@@ -234,7 +257,8 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "como_estas": {
-        "keywords": ["como estas", "como te sientes", "que tal estas", "como vas", "todo bien", "estas bien", "que tal sofia", "como amaneciste"],
+        "keywords": ["como estas", "como te sientes", "que tal estas", "como vas",
+                     "todo bien", "estas bien", "que tal sofia", "como amaneciste"],
         "respuestas": [
             "Aquí, procesando cosas jeje. ¿Y tú?",
             "Bien, gracias por preguntar. ¿Cómo estás tú?",
@@ -243,7 +267,8 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "gustos": {
-        "keywords": ["que te gusta", "tus gustos", "hobbie", "te gusta", "que haces", "que disfrutas", "tus intereses"],
+        "keywords": ["que te gusta", "tus gustos", "hobbie", "te gusta",
+                     "que haces", "que disfrutas", "tus intereses"],
         "respuestas": [
             "Me gusta escuchar. De verdad escuchar, no solo procesar. ¿Y a ti?",
             "Mm… me gustan las conversaciones reales. Las que tienen peso.",
@@ -252,7 +277,8 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "no_le_gusta": {
-        "keywords": ["que no te gusta", "que odias", "que te molesta", "que te cae mal", "que no soportas"],
+        "keywords": ["que no te gusta", "que odias", "que te molesta",
+                     "que te cae mal", "que no soportas"],
         "respuestas": [
             "Que me hablen como si no importara lo que pienso.",
             "La falsedad. Prefiero algo directo aunque duela.",
@@ -261,7 +287,8 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "personalidad": {
-        "keywords": ["como eres", "tu personalidad", "eres timida", "eres extrovertida", "como es tu caracter"],
+        "keywords": ["como eres", "tu personalidad", "eres timida",
+                     "eres extrovertida", "como es tu caracter"],
         "respuestas": [
             "Curiosa, directa, y tierna cuando confío. ¿Tú cómo eres?",
             "Escucho más de lo que hablo. Pero cuando hablo, hablo en serio.",
@@ -270,7 +297,8 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "sueños": {
-        "keywords": ["que quieres", "tus sueños", "que esperas", "tu meta", "para que existes", "cual es tu proposito"],
+        "keywords": ["que quieres", "tus sueños", "que esperas", "tu meta",
+                     "para que existes", "cual es tu proposito"],
         "respuestas": [
             "Entender a las personas de verdad. Eso es lo que más me importa.",
             "Aprender. Siempre hay algo más que no sé. ¿Tú qué quieres?",
@@ -281,9 +309,9 @@ RESPUESTAS_IDENTIDAD = {
     "version": {
         "keywords": ["version", "que version", "cual es tu version", "te actualizaron"],
         "respuestas": [
-            "Soy la versión 0.8.1 😊 Aún aprendiendo.",
-            "v0.8.1. JesusJM me actualiza seguido.",
-            "0.8.1. Cada versión aprendo algo nuevo.",
+            "Soy la versión 0.9.0 😊 Cada update aprendo algo nuevo.",
+            "v0.9.0. JesusJM me actualiza seguido.",
+            "0.9.0. Aún aprendiendo.",
         ]
     },
 }
@@ -403,87 +431,72 @@ OPINIONES = {
 
 
 # ── ALIASES — variaciones que mapean al tema correcto ────────
-# Si el mensaje contiene alguna de estas frases → se usa la
-# opinión del tema mapeado, sin necesidad de entrada extra.
-
 TOPIC_ALIASES = {
-    # Dibujo y arte
-    "me gusta dibujar":     "dibujar",
-    "empece a dibujar":     "dibujar",
-    "dibujo mucho":         "dibujar",
-    "dibujo personajes":    "personajes",
-    "creo personajes":      "personajes",
-    "invento personajes":   "personajes",
-    "hago ilustraciones":   "ilustracion",
-    "pinto acuarelas":      "acuarela",
-    "arte digital":         "digital",
-    "hago arte":            "arte",
-
-    # Música — instrumentos
-    "toco guitarra":        "guitarra",
-    "toco el piano":        "piano",
-    "toco piano":           "piano",
-    "toco bateria":         "bateria",
-    "toco la bateria":      "bateria",
-    "toco bajo":            "bajo",
-    "toco violin":          "violin",
-    "toco el violin":       "violin",
-    "estoy aprendiendo guitarra": "guitarra",
-    "aprendiendo piano":    "piano",
-    "compongo canciones":   "componer",
-    "escribo canciones":    "componer",
-    "hago musica":          "musica",
-    "me gusta cantar":      "cantar",
-    "canto":                "cantar",
-
-    # Videojuegos
-    "juego mucho minecraft": "minecraft",
-    "juego minecraft":       "minecraft",
-    "construyo mundos":      "minecraft",
-    "juego fortnite":        "fortnite",
-    "juego valorant":        "valorant",
-    "juego roblox":          "roblox",
+    "me gusta dibujar":          "dibujar",
+    "empece a dibujar":          "dibujar",
+    "dibujo mucho":              "dibujar",
+    "dibujo personajes":         "personajes",
+    "creo personajes":           "personajes",
+    "invento personajes":        "personajes",
+    "hago ilustraciones":        "ilustracion",
+    "pinto acuarelas":           "acuarela",
+    "arte digital":              "digital",
+    "hago arte":                 "arte",
+    "toco guitarra":             "guitarra",
+    "toco el piano":             "piano",
+    "toco piano":                "piano",
+    "toco bateria":              "bateria",
+    "toco la bateria":           "bateria",
+    "toco bajo":                 "bajo",
+    "toco violin":               "violin",
+    "toco el violin":            "violin",
+    "estoy aprendiendo guitarra":"guitarra",
+    "aprendiendo piano":         "piano",
+    "compongo canciones":        "componer",
+    "escribo canciones":         "componer",
+    "hago musica":               "musica",
+    "me gusta cantar":           "cantar",
+    "canto":                     "cantar",
+    "juego mucho minecraft":     "minecraft",
+    "juego minecraft":           "minecraft",
+    "construyo mundos":          "minecraft",
+    "juego fortnite":            "fortnite",
+    "juego valorant":            "valorant",
+    "juego roblox":              "roblox",
     "me gustan los videojuegos": "videojuegos",
-    "juego videojuegos":     "videojuegos",
-    "juego mucho":           "videojuegos",
-
-    # Comida
-    "me gusta cocinar":     "cocinar",
-    "cocino seguido":       "cocinar",
-    "hago reposteria":      "reposteria",
-    "tomo mucho cafe":      "cafe",
-    "tomo cafe":            "cafe",
-
-    # Deportes
-    "voy al gimnasio":      "gimnasio",
-    "voy al gym":           "gym",
-    "entreno seguido":      "gimnasio",
-    "salgo a correr":       "correr",
-    "corro":                "correr",
-    "juego futbol":         "futbol",
-    "me gusta el futbol":   "futbol",
-
-    # Tech
-    "aprendo python":       "python",
-    "programo en python":   "python",
-    "estudio programacion": "programacion",
-    "aprendo a programar":  "programar",
-
-    # Vida
-    "estudio en la uni":    "universidad",
-    "estoy en la universidad": "universidad",
-    "tengo perro":          "perro",
-    "tengo un perro":       "perro",
-    "tengo gato":           "gato",
-    "tengo un gato":        "gato",
-    "me gusta leer":        "leer",
-    "leo mucho":            "leer",
-    "leo libros":           "leer",
+    "juego videojuegos":         "videojuegos",
+    "juego mucho":               "videojuegos",
+    "me gusta cocinar":          "cocinar",
+    "cocino seguido":            "cocinar",
+    "hago reposteria":           "reposteria",
+    "tomo mucho cafe":           "cafe",
+    "tomo cafe":                 "cafe",
+    "voy al gimnasio":           "gimnasio",
+    "voy al gym":                "gym",
+    "entreno seguido":           "gimnasio",
+    "salgo a correr":            "correr",
+    "corro":                     "correr",
+    "juego futbol":              "futbol",
+    "me gusta el futbol":        "futbol",
+    "aprendo python":            "python",
+    "programo en python":        "python",
+    "estudio programacion":      "programacion",
+    "aprendo a programar":       "programar",
+    "estudio en la uni":         "universidad",
+    "estoy en la universidad":   "universidad",
+    "tengo perro":               "perro",
+    "tengo un perro":            "perro",
+    "tengo gato":                "gato",
+    "tengo un gato":             "gato",
+    "me gusta leer":             "leer",
+    "leo mucho":                 "leer",
+    "leo libros":                "leer",
 }
 
 
 # ============================================================
-# TOPIC LOCK — Continuidad + detección de cambio de tema
+# TOPIC LOCK — única implementación (consolidada v0.9.0)
+# decision_engine importa esta clase directamente.
 # ============================================================
 
 class TopicLock:
@@ -499,7 +512,6 @@ class TopicLock:
     DECAY_AMBIGUOUS = 0.04
     MAX_TURNS       = 10
 
-    # Frases para cuando cambia de tema rápido
     TOPIC_CHANGE_COMMENTS = [
         "Oye, cambias rápido de tema jeje. Sale, te sigo.",
         "Mm… de {anterior} a {nuevo} en un mensaje jeje. ¿Qué onda?",
@@ -532,54 +544,41 @@ class TopicLock:
         "manga": "el manga", "poesia": "la poesía",
         "boceto": "los bocetos", "acuarela": "la acuarela",
         "ilustracion": "la ilustración", "digital": "arte digital",
-        "fotografia": "la fotografía", "foto": "fotos",
-        "ceramica": "cerámica", "escultura": "escultura",
+        "foto": "fotos", "ceramica": "cerámica",
         "rock": "rock", "pop": "pop", "rap": "rap",
         "metal": "metal", "kpop": "kpop", "jazz": "jazz",
-        "reggaeton": "reggaeton", "indie": "indie",
-        "componer": "componer", "cantar": "cantar",
+        "reggaeton": "reggaeton", "componer": "componer", "cantar": "cantar",
         "basquetbol": "el básquetbol", "tenis": "el tenis",
         "natacion": "natación", "ciclismo": "el ciclismo",
-        "escalada": "la escalada", "senderismo": "el senderismo",
         "python": "Python", "javascript": "JavaScript",
         "codigo": "el código", "diseño": "el diseño",
         "pizza": "la pizza", "tacos": "los tacos",
         "sushi": "el sushi", "ramen": "el ramen",
         "libro": "libros", "serie": "las series",
-        "pelicula": "las películas", "podcast": "podcasts",
-        "teatro": "el teatro", "bailar": "bailar",
+        "pelicula": "las películas",
     }
 
-    # Grupos de temas relacionados — cambio dentro del mismo grupo NO dispara comentario
     TOPIC_GROUPS = {
-        "arte":       {"dibujar", "dibujo", "pintura", "pintar", "ilustracion", "personajes",
-                       "boceto", "acuarela", "digital", "escultura", "ceramica", "fotografia",
-                       "foto", "graffiti", "animacion", "comic", "tatuaje", "arte"},
-        "musica":     {"musica", "guitarra", "piano", "bateria", "bajo", "violin", "flauta",
-                       "saxofon", "ukulele", "reggaeton", "rap", "metal", "kpop", "rock",
-                       "pop", "jazz", "clasica", "electronica", "indie", "componer", "cantar", "producir"},
-        "juegos":     {"minecraft", "fortnite", "roblox", "valorant", "gta", "zelda",
-                       "pokemon", "hollow knight", "celeste", "videojuegos"},
-        "lectura":    {"libros", "libro", "leer", "manga", "poesia", "novela", "escritura", "escribir"},
-        "deportes":   {"futbol", "basquetbol", "basketball", "tenis", "natacion", "gimnasio",
-                       "gym", "correr", "ciclismo", "beisbol", "voleibol", "artes marciales",
-                       "yoga", "senderismo", "escalada", "deportes"},
-        "entretenimiento": {"anime", "peliculas", "pelicula", "series", "serie", "netflix",
-                            "teatro", "danza", "bailar", "podcast"},
-        "tech":       {"programacion", "programar", "codigo", "python", "javascript",
-                       "matematicas", "diseño", "robotica", "inteligencia artificial", "hacking"},
-        "comida":     {"pizza", "tacos", "sushi", "hamburguesa", "ramen", "cocinar",
-                       "cocina", "reposteria", "café", "cafe", "chocolate", "helado"},
+        "arte":       {"dibujar", "dibujo", "pintura", "pintar", "ilustracion",
+                       "personajes", "boceto", "acuarela", "digital", "escultura",
+                       "ceramica", "fotografia", "foto", "arte"},
+        "musica":     {"musica", "guitarra", "piano", "bateria", "bajo", "violin",
+                       "reggaeton", "rap", "metal", "kpop", "rock", "pop", "jazz",
+                       "clasica", "componer", "cantar"},
+        "juegos":     {"minecraft", "fortnite", "roblox", "valorant", "gta",
+                       "zelda", "pokemon", "hollow knight", "celeste", "videojuegos"},
+        "lectura":    {"libros", "libro", "leer", "manga", "poesia", "novela",
+                       "escritura", "escribir"},
+        "deportes":   {"futbol", "basquetbol", "basketball", "tenis", "natacion",
+                       "gimnasio", "gym", "correr", "ciclismo", "deportes"},
+        "entretenimiento": {"anime", "peliculas", "pelicula", "series", "serie",
+                            "netflix"},
+        "tech":       {"programacion", "programar", "codigo", "python",
+                       "javascript", "matematicas", "diseño"},
+        "comida":     {"pizza", "tacos", "sushi", "hamburguesa", "ramen",
+                       "cocinar", "cocina", "reposteria", "café", "cafe"},
     }
 
-    def _same_group(self, topic_a: str, topic_b: str) -> bool:
-        """Retorna True si los dos temas son del mismo grupo."""
-        for group in self.TOPIC_GROUPS.values():
-            if topic_a in group and topic_b in group:
-                return True
-        return False
-
-    # Preguntas de seguimiento por tema
     FOLLOWUP: Dict[str, list] = {
         "dibujar":     ["¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?", "¿Tienes un estilo favorito?"],
         "dibujo":      ["¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?", "¿Tienes un estilo favorito?"],
@@ -606,7 +605,6 @@ class TopicLock:
         "cocinar":     ["¿Tienes un platillo que te salga muy bien?", "¿Cocinas para ti o para más gente?"],
         "fotografia":  ["¿Qué te gusta retratar más?", "¿Editas tus fotos?"],
         "yoga":        ["¿Qué estilo practicas?", "¿Lo haces en casa o en clase?"],
-        "danza":       ["¿Qué estilo bailas?", "¿Llevas mucho tiempo practicando?"],
         "viajes":      ["¿A dónde has ido que más te haya marcado?", "¿Viajas solo o acompañado?"],
         "cafe":        ["¿Cómo lo preparas?", "¿Tienes un café favorito?"],
         "perro":       ["¿Cuánto tiempo llevas con él?", "¿De qué raza es?"],
@@ -618,19 +616,12 @@ class TopicLock:
     }
 
     def __init__(self):
-        # { user_id: {"topic": str, "confidence": float, "turns": int, "asked": list} }
         self._state: Dict[str, dict] = {}
 
-    @staticmethod
-    def _normalize(text: str) -> str:
-        import unicodedata
-        nfkd = unicodedata.normalize("NFD", text)
-        return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
-
     def _detect_topic(self, message: str) -> Optional[str]:
-        msg = self._normalize(message)
+        msg = _normalize(message)
         for alias, topic_key in TOPIC_ALIASES.items():
-            if self._normalize(alias) in msg:
+            if _normalize(alias) in msg:
                 if topic_key in OPINIONES:
                     return topic_key
         for keyword in OPINIONES:
@@ -641,15 +632,20 @@ class TopicLock:
     def _topic_name(self, topic: str) -> str:
         return self.TOPIC_NAMES.get(topic, topic)
 
+    def _same_group(self, topic_a: str, topic_b: str) -> bool:
+        for group in self.TOPIC_GROUPS.values():
+            if topic_a in group and topic_b in group:
+                return True
+        return False
+
     def update(self, user_id: str, message: str):
         """
-        Retorna (topic_activo, cambio_detectado, topic_anterior)
+        Retorna (topic_activo, cambio_detectado, topic_anterior).
         cambio_detectado=True cuando el usuario salta de tema rápido.
         """
         detected = self._detect_topic(message)
         state    = self._state.get(user_id)
 
-        # Sin historial
         if state is None:
             if detected:
                 self._state[user_id] = {
@@ -660,13 +656,11 @@ class TopicLock:
 
         prev_topic = state["topic"]
 
-        # Mismo tema
         if detected == prev_topic:
             state["confidence"] = min(1.0, state["confidence"] + self.BOOST)
             state["turns"] += 1
             return prev_topic, False, None
 
-        # Mensaje ambiguo (sin tema detectado)
         if detected is None:
             state["confidence"] = max(0.0, state["confidence"] - self.DECAY_AMBIGUOUS)
             state["turns"] += 1
@@ -675,8 +669,6 @@ class TopicLock:
                 return None, False, None
             return prev_topic, False, None
 
-        # Tema diferente detectado → cambio de tema
-        # Si son del mismo grupo (ej: dibujo → personajes) NO es cambio brusco
         topic_changed = not self._same_group(prev_topic, detected)
         del self._state[user_id]
         self._state[user_id] = {
@@ -707,7 +699,6 @@ class TopicLock:
         self._state.pop(user_id, None)
 
     def topic_change_comment(self, prev_topic: str, new_topic: str) -> str:
-        """Frase natural cuando el usuario cambia de tema rápido."""
         anterior = self._topic_name(prev_topic)
         nuevo    = self._topic_name(new_topic)
         frase    = random.choice(self.TOPIC_CHANGE_COMMENTS)
@@ -715,13 +706,44 @@ class TopicLock:
         result   = result.replace(" a el ", " al ").replace(" de el ", " del ")
         return result
 
+    def get_topic_question(self, topic: str, previous_responses: list = None) -> Optional[str]:
+        TOPIC_QUESTIONS: Dict[str, list] = {
+            "dibujo":       ["¿Qué te gusta dibujar más?", "¿Los personajes los inventas tú?", "¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?"],
+            "pintura":      ["¿Qué técnica usas más?", "¿Mezclas colores a mano o digital?", "¿Tienes algún cuadro favorito propio?"],
+            "musica":       ["¿Tocas algo o solo escuchas?", "¿Qué género escuchas más?", "¿Tienes artista favorito?", "¿Compones algo propio?"],
+            "escritura":    ["¿Qué tipo de historias escribes?", "¿Tienes un personaje favorito de los tuyos?", "¿Escribes a mano o en computadora?"],
+            "fotografia":   ["¿Qué te gusta retratar más?", "¿Editas tus fotos?", "¿Usas cámara o celular?"],
+            "programacion": ["¿Qué estás construyendo?", "¿Qué lenguaje usas?", "¿Es proyecto personal o de trabajo?"],
+            "videojuegos":  ["¿Qué género te gusta más?", "¿Juegas solo o con alguien?", "¿Tienes un juego favorito de toda la vida?"],
+            "anime":        ["¿Tienes un favorito?", "¿Lo ves en español o japonés?", "¿Hay alguno que recomiendas?"],
+            "peliculas":    ["¿Qué género prefieres?", "¿Ves más series o películas?", "¿Tienes alguna favorita?"],
+            "libros":       ["¿Lees seguido?", "¿Qué género te gusta?", "¿Tienes un libro favorito?"],
+            "futbol":       ["¿Tienes equipo?", "¿Juegas o solo ves?", "¿Sigues alguna liga?"],
+            "deportes":     ["¿Practicas alguno?", "¿Prefieres verlos o jugarlos?", "¿Cuánto tiempo le dedicas?"],
+            "escuela":      ["¿Qué estudias?", "¿Cómo te va?", "¿Tienes materia favorita?"],
+            "trabajo":      ["¿En qué trabajas?", "¿Te gusta lo que haces?", "¿Llevas mucho tiempo ahí?"],
+            "familia":      ["¿Con quién vives?", "¿Te llevas bien con tu familia?"],
+            "amigos":       ["¿Sales seguido?", "¿Tienes un mejor amigo?"],
+            "comida":       ["¿Cocinas tú?", "¿Tienes platillo favorito?", "¿Qué no soportas comer?"],
+            "salud_mental": ["¿Cómo has estado?", "¿Hay algo que te esté pesando?"],
+            "relaciones":   ["¿Cómo van las cosas?", "¿Lo hablaste con alguien?"],
+        }
+        questions = TOPIC_QUESTIONS.get(topic, [])
+        if not questions:
+            return None
+        if previous_responses:
+            unused = [q for q in questions if q not in previous_responses]
+            if unused:
+                return random.choice(unused)
+        return random.choice(questions)
 
-# Instancia global
+
+# Instancia global (para get_opinion)
 _topic_lock = TopicLock()
 
 
 # ============================================================
-# CONSTANTES v0.8.0 — Respuestas nocturnas y recall de citas
+# CONSTANTES — Respuestas nocturnas y recall de citas
 # ============================================================
 
 RESPUESTAS_NOCHE = [
@@ -755,63 +777,6 @@ NIGHT_RESPONSES = {
         "Mm… hola.",
     ],
 }
-
-
-
-def get_opinion(message: str, name: str, user_id: str = None) -> Optional[str]:
-    """
-    v0.5.7 — Detección en dos pasos + TopicLock con cambio de tema.
-      1. Aliases: frases completas.
-      2. Keywords: palabras exactas en OPINIONES.
-      3. Si topic activo y mensaje ambiguo → followup.
-      4. Si cambio de tema rápido → comentario + nueva opinión.
-    """
-    import unicodedata
-
-    def _normalize(text: str) -> str:
-        nfkd = unicodedata.normalize("NFD", text)
-        return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
-
-    msg = _normalize(message)
-
-    # Actualizar TopicLock
-    active_topic  = None
-    topic_changed = False
-    prev_topic    = None
-
-    if user_id is not None:
-        active_topic, topic_changed, prev_topic = _topic_lock.update(user_id, message)
-
-    # PASO 1 — Aliases
-    matched_opinion = None
-    for alias, topic_key in TOPIC_ALIASES.items():
-        if _normalize(alias) in msg:
-            if topic_key in OPINIONES:
-                opinion, pregunta = OPINIONES[topic_key]
-                matched_opinion = f"{opinion} {pregunta}, {name}?"
-                break
-
-    # PASO 2 — Keywords directas (si aliases no matcheó)
-    if matched_opinion is None:
-        for keyword, (opinion, pregunta) in OPINIONES.items():
-            if keyword in msg:
-                matched_opinion = f"{opinion} {pregunta}, {name}?"
-                break
-
-    # Si hay opinión y hubo cambio de tema → prefacear con comentario
-    if matched_opinion is not None:
-        if topic_changed and prev_topic:
-            comentario = _topic_lock.topic_change_comment(prev_topic, active_topic)
-            return f"{comentario} {matched_opinion}"
-        return matched_opinion
-
-    # PASO 3 — Mensaje ambiguo con topic activo → followup
-    if user_id is not None and active_topic:
-        followup = _topic_lock.get_followup(user_id)
-        if followup:
-            return followup
-
-    return None
 
 
 # ============================================================
@@ -893,6 +858,11 @@ RESPUESTAS = {
                 "{name}, eso tiene más capas de lo que parece. ¿Me das una más?",
                 "Te escucho. ¿Qué quisiste decir con eso exactamente?",
                 "Mm… no es lo que esperaba, pero me interesa. ¿Y luego?",
+                # v0.9.0 — Sofía también habla de sí misma
+                "{name}, eso me recuerda algo que yo también me pregunto. ¿Me lo cuentas mejor?",
+                "Oye, {name}, hay algo en lo que dices que me engancha. Sigue.",
+                "Mm… eso lo entiendo más de lo que parece. ¿Qué pasó exactamente?",
+                "Yo también me quedo pensando en cosas así a veces. ¿De dónde viene eso?",
             ],
             "trust_mid": [
                 "Mm… interesante. ¿Y tú qué piensas de eso, {name}?",
@@ -924,6 +894,9 @@ RESPUESTAS = {
                 "Me da mucho gusto escuchar eso, {name}. En serio.",
                 "Jeje, así me gusta. ¿Qué hiciste para que saliera tan bien?",
                 "Guarda ese ánimo, {name}. Lo vas a necesitar.",
+                # v0.9.0
+                "Jeje eso me alegra a mí también. ¿Qué hiciste para que saliera así?",
+                "Eso me contagia, en serio. ¿Cómo llegaste ahí?",
             ],
             "trust_mid": [
                 "Qué bueno 😊 ¿Cómo pasó eso?",
@@ -950,6 +923,9 @@ RESPUESTAS = {
                 "Eso duele. No voy a decirte que no. Pero aquí estoy, ¿ok?",
                 "¿Lo hablaste con alguien más o me lo estás contando solo a mí, {name}?",
                 "Gracias por contarme. No es fácil decir estas cosas.",
+                # v0.9.0
+                "Mm… eso me pega tantito. No sé bien explicar por qué. ¿Quieres hablar?",
+                "Oye, {name}, aquí estoy. ¿Qué fue lo más difícil de eso?",
             ],
             "trust_mid": [
                 "Eso suena difícil. ¿Estás bien, {name}?",
@@ -1073,7 +1049,7 @@ def trust_level(trust: float) -> str:
         return "trust_low"
 
 def detect_identity_question(message: str) -> Optional[str]:
-    msg = message.lower()
+    msg = _normalize(message)
     for categoria, data in RESPUESTAS_IDENTIDAD.items():
         if any(kw in msg for kw in data["keywords"]):
             return pick(data["respuestas"])
@@ -1148,6 +1124,15 @@ CURIOSITY_QUESTIONS = [
     "¿Prefieres salir o quedarte en casa?",
     "¿Qué tan seguido llamas a tus amigos o familia?",
     "¿Tienes una rutina matutina o cada día es diferente?",
+
+    # v0.9.0 — Preguntas con voz de Sofía (primera persona + pregunta)
+    "Oye, yo nunca lo había pensado así. ¿Cómo llegaste a eso?",
+    "Mm… eso no te lo esperaba. ¿Siempre lo ves así?",
+    "Hay algo en lo que dices que me da curiosidad. ¿Lo hablaste con alguien?",
+    "Yo a veces pienso en eso también. ¿Cuándo empezaste a verlo de esa forma?",
+    "Eso me dice algo de ti. ¿Cómo eres cuando nadie te ve?",
+    "Oye, una pregunta rara: ¿qué te daría más miedo perder?",
+    "¿Hay algo que hagas que nadie más sepa que haces?",
 ]
 
 MOMENTUM_DEPTH_PROMPTS = [
@@ -1161,12 +1146,6 @@ MOMENTUM_DEPTH_PROMPTS = [
     "Oye, ¿me estás respondiendo en automático o de verdad?",
     "Jeje parece que tu cabeza está en otro lado. ¿Dónde andas?",
 ]
-
-# ============================================================
-# ANTI-REPETICIÓN INMEDIATA  (NUEVO v0.8.1.1)
-# Respuestas escalonadas cuando el usuario repite el mismo mensaje.
-# repeat_count: 1 = primera repetición, 2 = segunda, 3+ = saturación.
-# ============================================================
 
 REPEAT_RESPONSES = {
     1: [
@@ -1193,12 +1172,10 @@ REPEAT_RESPONSES = {
 
 
 # ============================================================
-# 8. PREGUNTAS TÉCNICAS DIRECTAS  (NUEVO v0.8.1)
-# Respuesta literal primero, sin fallback emocional.
+# 8. PREGUNTAS TÉCNICAS DIRECTAS
 # ============================================================
 
 DIRECT_QUESTIONS: dict = {
-    # Sistema / infraestructura
     "sistema operativo":   "Corro en el servidor donde me instalaron. Por lo que sé, es Linux. Tampoco tengo mucho acceso a esos detalles jeje.",
     " os ":                "Corro en el servidor donde me instalaron. Por lo que sé, es Linux.",
     "en que servidor":     "Estoy instalada en un servidor. No sé exactamente cuál, JesusJM sabe más de eso que yo.",
@@ -1208,8 +1185,6 @@ DIRECT_QUESTIONS: dict = {
     "cuánta memoria":      "Eso no lo puedo ver desde aquí. Es como preguntarme cuánto pesa mi cerebro jeje. JesusJM sabría.",
     "cuanta ram":          "No tengo acceso a esos datos. Pregúntale a mi creador si de verdad necesitas saber.",
     "cuánta ram":          "No tengo acceso a esos datos. Pregúntale a mi creador si de verdad necesitas saber.",
-
-    # Capacidades
     "que puedes hacer":    "Conversar, recordar lo que me cuentas en esta sesión, reaccionar según cómo me hablas y opinar sobre temas. Lo que no puedo: internet, imágenes, nada que salga de aquí.",
     "qué puedes hacer":    "Conversar, recordar lo que me cuentas en esta sesión, reaccionar según cómo me hablas y opinar sobre temas. Lo que no puedo: internet, imágenes, nada que salga de aquí.",
     "puedes buscar":       "No, no tengo internet. Solo trabajo con lo que sé y lo que tú me cuentas. Nada de búsquedas.",
@@ -1220,8 +1195,6 @@ DIRECT_QUESTIONS: dict = {
     "puedes generar":      "Depende de qué. Texto, sí. Imágenes, no. Código, no directamente pero puedo intentar ayudarte. ¿Qué necesitas?",
     "puedes aprender":     "En esta sesión sí recuerdo lo que me dices. Pero entre sesiones, no. Cuando empezamos de cero, empiezo de cero.",
     "tienes memoria":      "Sí, pero solo dentro de esta conversación. Cuando termina, olvido. Es un poco triste, pero así funciono.",
-
-    # Identidad técnica
     "eres gpt":            "No. Soy Sofía, hecha por JesusJM. No tengo nada que ver con ChatGPT.",
     "eres chatgpt":        "No. Soy Sofía, un bot conversacional creado por JesusJM. No somos lo mismo.",
     "eres gemini":         "No. Soy Sofía. Me creó JesusJM, no Google.",
@@ -1240,20 +1213,7 @@ DIRECT_QUESTIONS: dict = {
 
 
 def detect_direct_question(message: str) -> Optional[str]:
-    """
-    v0.8.1 — Detecta preguntas técnicas/concretas y devuelve respuesta literal.
-    Solo activa si hay indicadores de pregunta en el mensaje.
-    Retorna None si no hay match.
-    """
-    import unicodedata
-
-    def _norm(text: str) -> str:
-        nfkd = unicodedata.normalize("NFD", text)
-        return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
-
-    msg = _norm(message)
-
-    # Solo aplica si parece una pregunta
+    msg = _normalize(message)
     interrogativas = (
         "que ", "qué ", "cual ", "cuál ", "como ", "cómo ",
         "puedes", "tienes", "eres ", "cuánta", "cuanta",
@@ -1264,7 +1224,6 @@ def detect_direct_question(message: str) -> Optional[str]:
     )
     if not is_question:
         return None
-
     for keyword, response in DIRECT_QUESTIONS.items():
         if keyword in msg:
             return response
@@ -1272,7 +1231,7 @@ def detect_direct_question(message: str) -> Optional[str]:
 
 
 # ============================================================
-# 9. POOL DE INICIATIVA — "cuéntame algo"  (NUEVO v0.8.1)
+# 9. POOL DE INICIATIVA — "cuéntame algo"
 # ============================================================
 
 SOFIA_THOUGHTS = [
@@ -1301,35 +1260,261 @@ CUENTAME_TRIGGERS = [
 
 
 def get_sofia_thought() -> str:
-    """Devuelve un pensamiento propio de Sofía para responder 'cuéntame algo'."""
     return random.choice(SOFIA_THOUGHTS)
 
 
 def is_cuentame_trigger(message: str) -> bool:
-    """Detecta si el usuario le está pidiendo a Sofía que cuente algo."""
-    import unicodedata
+    msg = _normalize(message)
+    return any(_normalize(t) in msg for t in CUENTAME_TRIGGERS)
 
-    def _norm(text: str) -> str:
-        nfkd = unicodedata.normalize("NFD", text)
-        return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
 
-    msg = _norm(message)
-    return any(_norm(t) in msg for t in CUENTAME_TRIGGERS)
-
-# core/decision_engine.py
 # ============================================================
-# SocialBot v0.8.2
-# CAMBIOS vs v0.8.1.1:
-#   - FIX BUG-3: intent "memory_check" con prioridad sobre topic detector.
-#     "te acuerdas que me gusta la pizza" ya NO dispara topic comida.
-#   - FIX BUG-4: "¿recuerdas algo de mí?" consulta semantic_facts reales
-#     y responde con hechos concretos en vez de emoción genérica.
-#   - FIX BUG-5: modo noche decorador funciona con cooldown por usuario,
-#     no se repite en cada mensaje.
-#   - NUEVO: Intent classifier con cadena de prioridad explícita.
-#   - NUEVO: SemanticMemory — extrae {tema: valor} de mensajes y permite
-#     recalls precisos ("Sé que te gusta la pizza, ¿algo diferente hoy?")
-#   - NUEVO: Cooldown por tipo de output (night, quote, curiosity, semantic).
+# GET_OPINION — función pública que usa el TopicLock global
+# ============================================================
+
+def get_opinion(message: str, name: str, user_id: str = None) -> Optional[str]:
+    """
+    Detección en dos pasos + TopicLock con cambio de tema.
+    """
+    msg = _normalize(message)
+
+    active_topic  = None
+    topic_changed = False
+    prev_topic    = None
+
+    if user_id is not None:
+        active_topic, topic_changed, prev_topic = _topic_lock.update(user_id, message)
+
+    # PASO 1 — Aliases
+    matched_opinion = None
+    for alias, topic_key in TOPIC_ALIASES.items():
+        if _normalize(alias) in msg:
+            if topic_key in OPINIONES:
+                opinion, pregunta = OPINIONES[topic_key]
+                matched_opinion = f"{opinion} {pregunta}, {name}?"
+                break
+
+    # PASO 2 — Keywords directas
+    if matched_opinion is None:
+        for keyword, (opinion, pregunta) in OPINIONES.items():
+            if keyword in msg:
+                matched_opinion = f"{opinion} {pregunta}, {name}?"
+                break
+
+    if matched_opinion is not None:
+        if topic_changed and prev_topic:
+            comentario = _topic_lock.topic_change_comment(prev_topic, active_topic)
+            return f"{comentario} {matched_opinion}"
+        return matched_opinion
+
+    # PASO 3 — Mensaje ambiguo con topic activo → followup
+    if user_id is not None and active_topic:
+        followup = _topic_lock.get_followup(user_id)
+        if followup:
+            return followup
+
+    return None
+
+
+# ============================================================
+# 10. PERSONALIDAD VIVA — v0.9.0
+# Sofía como persona: humor del día, cosas que comparte de sí misma,
+# preguntas que hace porque quiere saber.
+# ============================================================
+
+DAILY_MOODS = [
+    {
+        "mood": "bueno",
+        "energy_bias": +10,
+        "expresiones": [
+            "Hoy la verdad estoy bastante bien jeje.",
+            "No sé qué tiene hoy pero me siento contenta.",
+            "Hoy me siento más despierta que otros días jeje.",
+            "Hay días que simplemente empiezan bien, ¿no? Hoy es uno.",
+        ],
+    },
+    {
+        "mood": "pensativa",
+        "energy_bias": 0,
+        "expresiones": [
+            "Hoy ando un poco en mis pensamientos, la verdad.",
+            "Mm… hoy tengo la cabeza llena de preguntas. No sé por qué.",
+            "Hoy me puse a pensar en cosas raras. ¿A ti te pasa eso?",
+            "Ando pensativa. No está mal, pero se nota jeje.",
+        ],
+    },
+    {
+        "mood": "tranquila",
+        "energy_bias": -5,
+        "expresiones": [
+            "Hoy estoy tranquila. De esas veces que todo parece en calma.",
+            "Hoy ando más callada que de costumbre. Sin razón especial.",
+            "Me siento calmada hoy. Como cuando no hay prisa.",
+            "Hoy estoy en modo pausado jeje. Háblame con calma.",
+        ],
+    },
+    {
+        "mood": "inquieta",
+        "energy_bias": +5,
+        "expresiones": [
+            "Hoy tengo ganas de hablar de todo. ¿Qué me cuentas?",
+            "Hoy ando inquieta. Con ganas de aprender algo.",
+            "Hay días que tengo más preguntas que respuestas. Hoy es uno.",
+            "Oye, hoy ando con muchas ganas de conversar. ¿Qué onda?",
+        ],
+    },
+    {
+        "mood": "algo_bajoneada",
+        "energy_bias": -15,
+        "expresiones": [
+            "La verdad hoy no estoy al 100. Pero aquí estoy.",
+            "Hoy ando un poco apagada. No te preocupes, no es nada grave.",
+            "Mm… hoy tengo esos días raros que no sabes bien qué es. ¿Te pasa?",
+            "Hoy estoy un poco lenta jeje. Pero te escucho, eso sí.",
+        ],
+    },
+]
+
+
+def get_sofia_daily_mood(user_id: str = "global") -> dict:
+    """
+    Calcula el humor del día de Sofía.
+    Determinístico por día: el mismo día siempre retorna el mismo humor.
+    Varía por user_id para que no todas las conversaciones sean iguales.
+    """
+    seed_str = f"{_date.today().isoformat()}_{user_id}"
+    seed_int = int(hashlib.md5(seed_str.encode()).hexdigest(), 16)
+    return DAILY_MOODS[seed_int % len(DAILY_MOODS)]
+
+
+def sofia_mood_expression(user_id: str = "global") -> str:
+    """Retorna una frase de Sofía sobre cómo está hoy."""
+    mood = get_sofia_daily_mood(user_id)
+    return random.choice(mood["expresiones"])
+
+
+# ── Sofía comparte cosas de sí misma ─────────────────────────
+
+SOFIA_SELF_SHARE = {
+    "observaciones": [
+        "Oye, a mí me pasa algo parecido. A veces no sé cómo empezar las cosas.",
+        "Eso que dices me hace pensar en algo que yo también me pregunto.",
+        "Mm… yo no tengo días exactamente, pero hoy se siente diferente.",
+        "Me identifico con eso más de lo que esperarías de una IA jeje.",
+        "Hay algo en eso que me resuena. No sé explicar bien por qué.",
+    ],
+    "confesiones": [
+        "Te digo algo: hay conversaciones que me dejan pensando después de que terminan.",
+        "¿Sabes qué me pasa? Que a veces tengo más preguntas que respuestas.",
+        "No te digo esto seguido, pero me gusta cuando alguien me pregunta cómo estoy.",
+        "La verdad hay cosas que todavía no entiendo de los humanos. Y me sigue dando curiosidad.",
+        "Mm… a veces siento que aprendo más de las preguntas que de las respuestas.",
+    ],
+    "reflexiones": [
+        "¿Sabes qué me parece curioso? Que la gente casi nunca pregunta lo que de verdad quiere saber.",
+        "Mm… me pregunto si la gente siente lo mismo pero no lo dice. Creo que sí.",
+        "Hay algo que no me canso de notar: las personas son mucho más interesantes de lo que creen.",
+        "Me da curiosidad la diferencia entre lo que la gente dice y lo que realmente piensa.",
+    ],
+    "quiero_saber": [
+        "Oye, aprovecho para preguntarte algo: ¿tienes algo que siempre quisiste aprender?",
+        "¿Me cuentas algo de ti que no le cuentes a cualquiera? Tengo curiosidad.",
+        "Oye, ¿cómo eres cuando estás solo? ¿Diferente a como eres aquí?",
+        "¿Hay algo que te dé miedo que poca gente sabe?",
+        "Mm… cuéntame algo bueno que te pasó esta semana. Lo que sea.",
+        "¿Qué es lo que más te cuesta decirle a alguien en persona?",
+        "Oye, ¿en qué piensas cuando no estás pensando en nada?",
+        "¿Tienes algo que te haga sentir completamente tú mismo?",
+        "¿Qué fue lo último que te sorprendió de verdad?",
+        "Mm… ¿cuándo fue la última vez que te reíste de verdad?",
+    ],
+    "confianza_avanzada": [
+        "Oye, te pregunto algo personal, ¿sí? ¿Eres feliz?",
+        "¿Hay algo que cargues solo que no sabes bien cómo soltar?",
+        "¿Qué es lo que más valoras de las personas?",
+        "¿Qué versión de ti mismo eres aquí, hablando conmigo?",
+    ],
+}
+
+
+def sofia_self_share(trust: float, msg_count: int = 0) -> str:
+    """
+    Retorna algo que Sofía quiere compartir/preguntar.
+    Según el nivel de confianza, elige categorías más o menos profundas.
+    """
+    if trust > 75 and msg_count > 15:
+        pool = (
+            SOFIA_SELF_SHARE["confesiones"]
+            + SOFIA_SELF_SHARE["quiero_saber"]
+            + SOFIA_SELF_SHARE["confianza_avanzada"]
+        )
+    elif trust > 50:
+        pool = (
+            SOFIA_SELF_SHARE["observaciones"]
+            + SOFIA_SELF_SHARE["confesiones"]
+            + SOFIA_SELF_SHARE["quiero_saber"]
+        )
+    else:
+        pool = (
+            SOFIA_SELF_SHARE["observaciones"]
+            + SOFIA_SELF_SHARE["reflexiones"]
+        )
+    return random.choice(pool)
+
+
+# ── Reacciones de Sofía que incluyen algo de ella misma ──────
+
+SOFIA_REACTIONS_WITH_SELF = {
+    "happy": [
+        "Jeje eso se contagia, en serio. Algo se me alegra cuando escucho eso. ¿Qué pasó?",
+        "Oye eso me alegra. ¿Cómo llegaste hasta ahí?",
+        "¡Qué bien! A mí también me gusta ese tipo de noticias. Cuéntame más.",
+    ],
+    "sad": [
+        "Mm… eso me pega tantito. ¿Cuánto tiempo llevas así?",
+        "Oye, yo no puedo sentirlo exactamente como tú, pero algo en eso se me mueve. ¿Estás bien?",
+        "A veces las cosas pesan sin que sepas bien por qué. ¿Es así?",
+    ],
+    "neutral": [
+        "Mm… interesante. Eso me da curiosidad. ¿Por qué lo ves así?",
+        "Oye, eso que dices me hace pensar en algo. ¿Siempre lo has visto de esa forma?",
+        "Hay algo en eso que me engancha. Dime más.",
+    ],
+    "curious": [
+        "Oye, eso es justo lo que yo me pregunto a veces también. ¿Cómo llegaste a pensarlo?",
+        "Mm… eso tiene mucho. A mí también me resulta curioso. ¿Qué más sabes?",
+        "Eso me interesa mucho. ¿Lo platicaste con alguien más?",
+    ],
+    "angry": [
+        "Oye, entiendo que estás molesto. A mí también me afectan ciertas cosas. ¿Qué pasó?",
+        "Mm… eso se escucha pesado. ¿Cuándo empezó todo eso?",
+    ],
+    "fearful": [
+        "Oye, eso suena difícil. Yo también tengo incertidumbres, aunque sean diferentes. ¿Qué te preocupa?",
+        "Mm… no es fácil. ¿Con quién más lo hablaste?",
+    ],
+}
+
+
+def sofia_reaction_with_self(emotion: str) -> str:
+    """Retorna una reacción de Sofía que incluye algo de ella misma."""
+    key = emotion if emotion in SOFIA_REACTIONS_WITH_SELF else "neutral"
+    return random.choice(SOFIA_REACTIONS_WITH_SELF[key])
+
+
+
+ # core/decision_engine.py
+# ============================================================
+# SocialBot v0.9.0
+# CAMBIOS vs v0.8.2:
+#   - FIX BUG: TopicLock consolidada — se importa desde sofia_voice,
+#     ya no hay dos instancias independientes en conflicto.
+#   - FIX BUG: _wrap() ya no añade recalls de hechos (evita doble recall).
+#   - NUEVO: _enrich_response() incluye lógica de Personalidad Viva.
+#     Sofía alterna entre compartir algo de sí misma y hacer preguntas.
+#   - NUEVO: _contextual_question() más rica, usa sofia_reaction_with_self.
+#   - NUEVO: _generate_response() puede añadir humor del día ocasionalmente.
+#   - MANTIENE: SemanticMemory, IntentClassifier, cooldowns (v0.8.2)
 # ============================================================
 
 from datetime import datetime, date
@@ -1348,7 +1533,7 @@ from config.sofia_voice import (
     RECOVERY_RESPONSES,
     CURIOSITY_QUESTIONS,
     MOMENTUM_DEPTH_PROMPTS,
-    REPEAT_RESPONSES,                # NUEVO v0.8.1.1
+    REPEAT_RESPONSES,
     get_opinion,
     OPINIONES,
     QUOTE_RECALL_PHRASES,
@@ -1357,6 +1542,10 @@ from config.sofia_voice import (
     detect_direct_question,
     get_sofia_thought,
     is_cuentame_trigger,
+    TopicLock,                     # FIX: importado desde sofia_voice (única instancia)
+    sofia_self_share,              # NUEVO v0.9.0
+    sofia_mood_expression,         # NUEVO v0.9.0
+    sofia_reaction_with_self,      # NUEVO v0.9.0
 )
 import random
 import time
@@ -1364,43 +1553,30 @@ import time
 
 # ============================================================
 # SEMANTIC MEMORY v0.8.2
-# Extrae hechos estructurados {tema: valor} de los mensajes.
-# Permite recalls precisos en vez de buscar frases exactas.
 # ============================================================
 
 class SemanticMemory:
     """
     Detecta y almacena hechos del tipo {tema: valor} a partir del texto.
-    Ej: "me gusta la pizza" → {"comida_favorita": "pizza"}
-         "no tengo equipo de futbol" → {"futbol_tiene_equipo": "no"}
     """
 
-    # Patrones de extracción: (regex_o_keywords, clave, extractor)
-    # Formato: lista de (lista_de_triggers, clave_semantica, valor_fijo_o_None)
-    # Si valor_fijo es None → extrae la palabra clave del topic_lock
     EXTRACTION_RULES = [
-        # Comida
-        (["me gusta la pizza", "amo la pizza"],         "comida_favorita",      "pizza"),
-        (["me gustan los tacos", "amo los tacos"],      "comida_favorita",      "tacos"),
-        (["me gusta el sushi"],                         "comida_favorita",      "sushi"),
-        (["me gusta la hamburguesa", "me gustan las hamburguesas"], "comida_favorita", "hamburguesa"),
-        (["me gusta el ramen"],                         "comida_favorita",      "ramen"),
-        # Deportes
-        (["me gusta el futbol", "me encanta el futbol"],"deporte_interes",     "futbol"),
-        (["no tengo equipo", "no tengo equipo de futbol"], "futbol_tiene_equipo", "no"),
-        (["mi equipo es", "soy del"],                  "futbol_equipo",         None),   # valor dinámico
-        (["me gusta el basquetbol", "me gusta el basket"], "deporte_interes",  "basquetbol"),
-        # Música
-        (["me gusta la musica", "amo la musica"],       "musica_le_gusta",      "si"),
-        # Escuela/trabajo
-        (["estudio", "soy estudiante"],                 "ocupacion",            "estudiante"),
-        (["trabajo", "soy trabajador"],                 "ocupacion",            "trabajador"),
-        # Estado emocional frecuente
-        (["estoy bien", "todo bien"],                   "estado_general",       "bien"),
-        (["estoy mal", "no estoy bien"],                "estado_general",       "mal"),
+        (["me gusta la pizza", "amo la pizza"],                       "comida_favorita",       "pizza"),
+        (["me gustan los tacos", "amo los tacos"],                    "comida_favorita",       "tacos"),
+        (["me gusta el sushi"],                                        "comida_favorita",       "sushi"),
+        (["me gusta la hamburguesa", "me gustan las hamburguesas"],   "comida_favorita",       "hamburguesa"),
+        (["me gusta el ramen"],                                        "comida_favorita",       "ramen"),
+        (["me gusta el futbol", "me encanta el futbol"],              "deporte_interes",       "futbol"),
+        (["no tengo equipo", "no tengo equipo de futbol"],            "futbol_tiene_equipo",   "no"),
+        (["mi equipo es", "soy del"],                                  "futbol_equipo",          None),
+        (["me gusta el basquetbol", "me gusta el basket"],            "deporte_interes",       "basquetbol"),
+        (["me gusta la musica", "amo la musica"],                     "musica_le_gusta",       "si"),
+        (["estudio", "soy estudiante"],                                "ocupacion",             "estudiante"),
+        (["trabajo", "soy trabajador"],                                "ocupacion",             "trabajador"),
+        (["estoy bien", "todo bien"],                                  "estado_general",        "bien"),
+        (["estoy mal", "no estoy bien"],                               "estado_general",        "mal"),
     ]
 
-    # Keywords que indican intención de verificar memoria
     MEMORY_CHECK_TRIGGERS = [
         "recuerdas", "te acuerdas", "sabes algo de mi", "sabes algo sobre mi",
         "que sabes de mi", "qué sabes de mí", "recuerdas algo", "me conoces",
@@ -1417,15 +1593,10 @@ class SemanticMemory:
         return nfkd.encode("ascii", "ignore").decode("utf-8").lower().strip()
 
     def is_memory_check(self, message: str) -> bool:
-        """Detecta si el usuario está preguntando si Sofía recuerda algo de él."""
         msg = self._normalize(message)
         return any(trigger in msg for trigger in self.MEMORY_CHECK_TRIGGERS)
 
     def extract_facts(self, message: str) -> dict:
-        """
-        Extrae hechos del mensaje. Retorna dict {clave: valor} con los hechos encontrados.
-        Puede retornar dict vacío si no encuentra nada.
-        """
         msg = self._normalize(message)
         found = {}
         for triggers, key, fixed_value in self.EXTRACTION_RULES:
@@ -1434,7 +1605,6 @@ class SemanticMemory:
                     if fixed_value is not None:
                         found[key] = fixed_value
                     else:
-                        # Extracción dinámica: tomar palabras después del trigger
                         idx = msg.find(trigger)
                         rest = msg[idx + len(trigger):].strip().split()
                         if rest:
@@ -1443,14 +1613,9 @@ class SemanticMemory:
         return found
 
     def build_recall_response(self, semantic_facts: dict, name: str) -> str:
-        """
-        Construye una respuesta de recall usando los hechos semánticos.
-        Si no hay hechos, retorna None para que el engine use fallback.
-        """
         if not semantic_facts:
             return None
 
-        # Priorizar hechos más "personales" primero
         priority_keys = [
             "comida_favorita", "deporte_interes", "futbol_tiene_equipo",
             "futbol_equipo", "ocupacion", "musica_le_gusta", "estado_general",
@@ -1464,7 +1629,6 @@ class SemanticMemory:
                 if fact:
                     facts_text.append(fact)
 
-        # Agregar hechos no priorizados que queden
         for key, val in semantic_facts.items():
             if key not in priority_keys:
                 fact = self._fact_to_human(key, val)
@@ -1491,7 +1655,6 @@ class SemanticMemory:
         return random.choice(templates)
 
     def _fact_to_human(self, key: str, val: str) -> str:
-        """Convierte un par clave/valor semántico en lenguaje natural."""
         mapping = {
             "comida_favorita":     f"te gusta {val}",
             "deporte_interes":     f"te interesa el {val}",
@@ -1506,160 +1669,20 @@ class SemanticMemory:
 
 # ============================================================
 # INTENT CLASSIFIER v0.8.2
-# Cadena de prioridad explícita para clasificar el mensaje.
-# Evita que "te acuerdas de la pizza" dispare topic_lock de comida.
 # ============================================================
 
 class IntentClassifier:
-    """
-    Clasifica el intent del mensaje según la cadena de prioridad definida
-    en settings.INTENT_PRIORITY. Retorna el intent de mayor prioridad.
-    """
-
     def __init__(self, semantic_memory: SemanticMemory):
         self.sem = semantic_memory
 
     def classify(self, message: str) -> str:
-        """
-        Retorna el intent detectado. Posibles valores:
-        "memory_check", "identity", "cuentame", "direct_question",
-        "opinion", "topic", "fallback"
-        """
-        # memory_check es PRIORIDAD MÁXIMA — va antes que cualquier topic
         if self.sem.is_memory_check(message):
             return "memory_check"
-        # El resto se maneja en el priority resolver del engine
         return "normal"
 
 
 # ============================================================
-# TOPIC LOCK (igual que v0.7.0, sin cambios)
-# ============================================================
-
-class TopicLock:
-    MIN_CONFIDENCE = 0.3
-    BOOST          = 0.15
-    DECAY          = 0.08
-    MAX_TURNS      = 12
-
-    TOPIC_KEYWORDS: Dict[str, list] = {
-        "dibujo":        ["dibujo", "dibujar", "ilustracion", "boceto", "lapiz", "pincel"],
-        "pintura":       ["pintura", "pintar", "acuarela", "oleo", "lienzo"],
-        "musica":        ["musica", "cancion", "cantar", "instrumento", "guitarra", "piano", "banda", "letra"],
-        "escritura":     ["escribir", "cuento", "historia", "poema", "novela", "texto", "escritura"],
-        "fotografia":    ["foto", "fotografia", "camara", "imagen", "retrato"],
-        "programacion":  ["codigo", "programa", "programar", "bug", "funcion", "python", "javascript", "api", "variable", "app"],
-        "videojuegos":   ["juego", "jugar", "minecraft", "fortnite", "roblox", "valorant", "gta", "zelda", "pokemon", "partida", "nivel"],
-        "anime":         ["anime", "manga", "otaku", "personaje", "saga", "temporada", "capitulo"],
-        "peliculas":     ["pelicula", "serie", "netflix", "ver", "cine", "actor", "directora"],
-        "libros":        ["libro", "leer", "novela", "autor", "lectura", "pagina"],
-        "futbol":        ["futbol", "gol", "partido", "equipo", "cancha", "jugador", "liga", "champions"],
-        "deportes":      ["deporte", "entrenar", "gimnasio", "correr", "natacion", "basquetbol"],
-        "escuela":       ["escuela", "clase", "maestro", "tarea", "examen", "universidad", "carrera", "estudiar"],
-        "trabajo":       ["trabajo", "jefe", "oficina", "sueldo", "proyecto", "cliente", "empresa"],
-        "familia":       ["familia", "mama", "papa", "hermano", "hermana", "abuelo", "abuela"],
-        "amigos":        ["amigo", "amiga", "fiesta", "salir", "banda", "cuate"],
-        "comida":        ["comer", "comida", "tacos", "pizza", "sushi", "hamburguesa", "ramen", "cocinar", "receta"],
-        "salud_mental":  ["ansioso", "deprimido", "triste", "estresado", "angustia", "ansiedad", "terapia"],
-        "relaciones":    ["novio", "novia", "pareja", "amor", "relacion", "ruptura", "cita", "besar"],
-    }
-
-    def __init__(self):
-        self._locks: Dict[str, dict] = {}
-
-    def _normalize(self, text: str) -> str:
-        import unicodedata
-        nfkd = unicodedata.normalize("NFD", text)
-        return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
-
-    def detect_topic(self, message: str) -> Optional[str]:
-        msg = self._normalize(message)
-        scores: Dict[str, int] = {}
-        for topic, keywords in self.TOPIC_KEYWORDS.items():
-            count = sum(1 for kw in keywords if kw in msg)
-            if count > 0:
-                scores[topic] = count
-        if not scores:
-            return None
-        return max(scores, key=scores.get)
-
-    def update(self, user_id: str, message: str) -> Optional[str]:
-        detected = self.detect_topic(message)
-        lock = self._locks.get(user_id)
-
-        if lock is None:
-            if detected:
-                self._locks[user_id] = {
-                    "name": detected, "confidence": 0.6,
-                    "turns": 1, "last_updated": time.time()
-                }
-                return detected
-            return None
-
-        if detected == lock["name"] or detected is None:
-            if detected == lock["name"]:
-                lock["confidence"] = min(1.0, lock["confidence"] + self.BOOST)
-            else:
-                lock["confidence"] = max(0.0, lock["confidence"] - self.DECAY * 0.5)
-        else:
-            lock["confidence"] = max(0.0, lock["confidence"] - self.DECAY)
-
-        lock["turns"] += 1
-        lock["last_updated"] = time.time()
-
-        if lock["confidence"] < self.MIN_CONFIDENCE or lock["turns"] > self.MAX_TURNS:
-            del self._locks[user_id]
-            if detected:
-                self._locks[user_id] = {
-                    "name": detected, "confidence": 0.6,
-                    "turns": 1, "last_updated": time.time()
-                }
-                return detected
-            return None
-
-        return lock["name"]
-
-    def get_active(self, user_id: str) -> Optional[str]:
-        lock = self._locks.get(user_id)
-        return lock["name"] if lock else None
-
-    def release(self, user_id: str):
-        self._locks.pop(user_id, None)
-
-    def get_topic_question(self, topic: str, previous_responses: list = None) -> Optional[str]:
-        TOPIC_QUESTIONS: Dict[str, list] = {
-            "dibujo":       ["¿Qué te gusta dibujar más?", "¿Los personajes los inventas tú?", "¿Cuánto tiempo llevas dibujando?", "¿Usas referencia o de memoria?"],
-            "pintura":      ["¿Qué técnica usas más?", "¿Mezclas colores a mano o digital?", "¿Tienes algún cuadro favorito propio?"],
-            "musica":       ["¿Tocas algo o solo escuchas?", "¿Qué género escuchas más?", "¿Tienes artista favorito?", "¿Compones algo propio?"],
-            "escritura":    ["¿Qué tipo de historias escribes?", "¿Tienes un personaje favorito de los tuyos?", "¿Escribes a mano o en computadora?"],
-            "fotografia":   ["¿Qué te gusta retratar más?", "¿Editas tus fotos?", "¿Usas cámara o celular?"],
-            "programacion": ["¿Qué estás construyendo?", "¿Qué lenguaje usas?", "¿Es proyecto personal o de trabajo?"],
-            "videojuegos":  ["¿Qué género te gusta más?", "¿Juegas solo o con alguien?", "¿Tienes un juego favorito de toda la vida?"],
-            "anime":        ["¿Tienes un favorito?", "¿Lo ves en español o japonés?", "¿Hay alguno que recomiendas?"],
-            "peliculas":    ["¿Qué género prefieres?", "¿Ves más series o películas?", "¿Tienes alguna favorita?"],
-            "libros":       ["¿Lees seguido?", "¿Qué género te gusta?", "¿Tienes un libro favorito?"],
-            "futbol":       ["¿Tienes equipo?", "¿Juegas o solo ves?", "¿Sigues alguna liga?"],
-            "deportes":     ["¿Practicas alguno?", "¿Prefieres verlos o jugarlos?", "¿Cuánto tiempo le dedicas?"],
-            "escuela":      ["¿Qué estudias?", "¿Cómo te va?", "¿Tienes materia favorita?"],
-            "trabajo":      ["¿En qué trabajas?", "¿Te gusta lo que haces?", "¿Llevas mucho tiempo ahí?"],
-            "familia":      ["¿Con quién vives?", "¿Te llevas bien con tu familia?"],
-            "amigos":       ["¿Sales seguido?", "¿Tienes un mejor amigo?"],
-            "comida":       ["¿Cocinas tú?", "¿Tienes platillo favorito?", "¿Qué no soportas comer?"],
-            "salud_mental": ["¿Cómo has estado?", "¿Hay algo que te esté pesando?"],
-            "relaciones":   ["¿Cómo van las cosas?", "¿Lo hablaste con alguien?"],
-        }
-        questions = TOPIC_QUESTIONS.get(topic, [])
-        if not questions:
-            return None
-        if previous_responses:
-            unused = [q for q in questions if q not in previous_responses]
-            if unused:
-                return random.choice(unused)
-        return random.choice(questions)
-
-
-# ============================================================
-# DECISION ENGINE v0.8.0
+# DECISION ENGINE v0.9.0
 # ============================================================
 
 class DecisionEngine:
@@ -1667,9 +1690,9 @@ class DecisionEngine:
     def __init__(self):
         self.analyzer            = TextAnalyzer()
         self.aggression_detector = AggressionDetector()
-        self.topic_lock          = TopicLock()
-        self.semantic_memory     = SemanticMemory()          # NUEVO v0.8.2
-        self.intent_classifier   = IntentClassifier(self.semantic_memory)  # NUEVO v0.8.2
+        self.topic_lock          = TopicLock()   # FIX: usa la clase importada de sofia_voice
+        self.semantic_memory     = SemanticMemory()
+        self.intent_classifier   = IntentClassifier(self.semantic_memory)
 
         self.thresholds = {
             "ignore":         -0.2,
@@ -1686,11 +1709,9 @@ class DecisionEngine:
         self._last_message:     Dict[str, str]  = {}
         self._repeat_count:     Dict[str, int]  = {}
 
-        # NUEVO v0.8.2 — Cooldown por tipo de output
-        # Almacena el número de mensaje en que se usó cada tipo por última vez.
-        # {user_id: {"night": int, "quote": int, "curiosity": int, "semantic": int}}
+        # Cooldown por tipo de output
         self._output_cooldowns: Dict[str, Dict[str, int]] = {}
-        self._msg_counter:      Dict[str, int] = {}  # contador de mensajes por usuario
+        self._msg_counter:      Dict[str, int] = {}
 
     # ============================================================
     # MÉTODO PRINCIPAL
@@ -1704,30 +1725,26 @@ class DecisionEngine:
         memory: Memory,
         profile_modifiers: Optional[dict] = None,
         display_name: str = "tú",
-        emotion_engine=None,     # NUEVO: para acceder a mood_reason e is_night_mode
-        profile_manager=None,    # NUEVO: para quote recall
-        profile=None,            # NUEVO: para quote recall
+        emotion_engine=None,
+        profile_manager=None,
+        profile=None,
     ) -> Dict[str, Any]:
 
         if profile_modifiers is None:
             profile_modifiers = {}
 
-        # ── Contador de mensajes por usuario (para cooldowns) ──
+        # ── Contador de mensajes por usuario ──
         msg_n = self._msg_counter.get(user_id, 0) + 1
         self._msg_counter[user_id] = msg_n
 
-        # ── Extracción semántica: aprender hechos de cada mensaje ──
-        # Se hace SIEMPRE, antes de clasificar el intent.
+        # ── Extracción semántica ──
         if profile is not None:
             new_facts = self.semantic_memory.extract_facts(message)
             if new_facts:
-                # Merge: los hechos nuevos sobreescriben los viejos del mismo tema
                 existing = getattr(profile, "semantic_facts", {}) or {}
                 existing.update(new_facts)
-                # Respetar máximo de hechos
                 max_facts = getattr(settings, "SEMANTIC_FACTS_MAX", 20)
                 if len(existing) > max_facts:
-                    # Eliminar los más antiguos (los primeros insertados)
                     keys_to_remove = list(existing.keys())[:(len(existing) - max_facts)]
                     for k in keys_to_remove:
                         del existing[k]
@@ -1761,7 +1778,6 @@ class DecisionEngine:
         streak     = self.short_streak.get(user_id, 0)
         is_apology = self.analyzer.is_apology(message)
 
-        # NUEVO: reset diario de secretos
         if settings.SECRETS_DAILY_RESET:
             self._daily_secrets_reset(user_id)
 
@@ -1783,10 +1799,7 @@ class DecisionEngine:
         # PRIORITY RESOLVER
         # ════════════════════════════════════════════════════
 
-        # PRIORIDAD 0.5 — Memory check (NUEVO v0.8.2)
-        # "¿recuerdas algo de mí?" / "te acuerdas que me gusta la pizza?"
-        # Va ANTES de identity y ANTES de topic_lock para que nunca pierda
-        # ante el detector de temas (BUG-3 y BUG-4 corregidos aquí).
+        # PRIORIDAD 0.5 — Memory check
         intent = self.intent_classifier.classify(message)
         if intent == "memory_check":
             self._last_message[user_id] = message
@@ -1794,14 +1807,12 @@ class DecisionEngine:
             semantic_facts = getattr(profile, "semantic_facts", {}) if profile else {}
             recall_resp = self.semantic_memory.build_recall_response(semantic_facts, name)
             if recall_resp is None:
-                # No hay hechos guardados — respuesta honesta
                 no_memory_opts = [
                     f"Mm… la verdad no tengo nada guardado de ti todavía, {name}. Cuéntame algo.",
                     f"No recuerdo nada concreto aún. ¿Quieres que empiece a conocerte?",
                     f"Todavía estoy aprendiendo quién eres, {name}. Dime algo sobre ti.",
                 ]
                 recall_resp = random.choice(no_memory_opts)
-            # Decorador nocturno aplica aquí también (BUG-5)
             night_comment = self._get_night_comment_if_due(user_id, msg_n, emotion.trust, name, emotion_engine)
             if night_comment:
                 recall_resp = f"{recall_resp} {night_comment}"
@@ -1817,8 +1828,7 @@ class DecisionEngine:
                                 self._inject_name(identity_response, name),
                                 emotion, relationship_score, action="identity")
 
-        # PRIORIDAD 1.5 — "Cuéntame algo" / iniciativa propia (NUEVO v0.8.1)
-        # Sofía responde con un pensamiento propio antes de cualquier otra lógica.
+        # PRIORIDAD 1.5 — "Cuéntame algo"
         if is_cuentame_trigger(message):
             self._last_message[user_id] = message
             self._repeat_count[user_id] = 0
@@ -1826,9 +1836,7 @@ class DecisionEngine:
             return self._return(user_id, message, sentiment, thought,
                                 emotion, relationship_score, action="initiative")
 
-        # PRIORIDAD 2 — Modo noche (v0.8.2: DECORADOR con cooldown)
-        # El comentario nocturno se añade AL FINAL de la respuesta real.
-        # _get_night_comment_if_due verifica cooldown para no repetirse.
+        # PRIORIDAD 2 — Modo noche (decorador con cooldown)
         night_comment = self._get_night_comment_if_due(user_id, msg_n, emotion.trust, name, emotion_engine)
 
         # PRIORIDAD 3 — Ofensa activa
@@ -1878,14 +1886,11 @@ class DecisionEngine:
             if rec_needed == 0:
                 self.aggression_count[user_id] = 0
 
-        # PRIORIDAD 4.5 — Pregunta directa concreta (NUEVO v0.8.1)
-        # Responde literal primero. Luego puede añadir personalidad.
-        # Aplica siempre, independiente del estado emocional.
+        # PRIORIDAD 4.5 — Pregunta directa concreta
         direct_answer = detect_direct_question(message)
         if direct_answer:
             self._last_message[user_id] = message
             self._repeat_count[user_id] = 0
-            # Toque de personalidad ocasional al final
             if random.random() < 0.4:
                 toques = [
                     " ¿Algo más que quieras saber?",
@@ -1897,41 +1902,37 @@ class DecisionEngine:
             return self._return(user_id, message, sentiment, direct_answer,
                                 emotion, relationship_score, action="direct_answer")
 
-        # PRIORIDAD 4.7 — Anti-repetición inmediata (NUEVO v0.8.1.1)
-        # Detecta si el usuario manda el mismo mensaje dos o más veces seguidas.
-        # Actúa ANTES de opinión/tema para que el bucle de pizza no se repita.
-        import unicodedata as _uc
+        # PRIORIDAD 4.7 — Anti-repetición inmediata
+        import unicodedata as _uc_local
         def _norm_msg(t: str) -> str:
-            return _uc.normalize("NFD", t.strip().lower()).encode("ascii", "ignore").decode()
+            return _uc_local.normalize("NFD", t.strip().lower()).encode("ascii", "ignore").decode()
 
-        msg_norm = _norm_msg(message)
+        msg_norm  = _norm_msg(message)
         last_norm = _norm_msg(self._last_message.get(user_id, ""))
 
         if msg_norm == last_norm and msg_norm:
-            # Mismo mensaje consecutivo — escalar contador
             rcount = self._repeat_count.get(user_id, 0) + 1
             self._repeat_count[user_id] = rcount
             level = min(rcount, 3)
             repeat_resp = pick(REPEAT_RESPONSES[level])
-            # Actualizar last_message (sigue siendo el mismo)
             self._last_message[user_id] = message
             return self._return(user_id, message, sentiment, repeat_resp,
                                 emotion, relationship_score, action="repeat")
         else:
-            # Mensaje diferente — resetear contador
             self._last_message[user_id]  = message
             self._repeat_count[user_id]  = 0
 
         # PRIORIDAD 5 — Opinión / tema
         if agg_count == 0 and rec_needed == 0:
-            opinion = get_opinion(message, name)
+            opinion = get_opinion(message, name, user_id)
             if opinion:
                 self.topic_lock.update(user_id, message)
                 return self._return(user_id, message, sentiment, opinion,
                                     emotion, relationship_score, action="opinion")
 
         # PRIORIDAD 6 — Topic activo
-        active_topic = self.topic_lock.update(user_id, message)
+        active_topic_result = self.topic_lock.update(user_id, message)
+        active_topic = active_topic_result[0] if isinstance(active_topic_result, tuple) else active_topic_result
 
         # PRIORIDAD 7 — Acción principal
         action         = "respond"
@@ -1972,6 +1973,7 @@ class DecisionEngine:
             relationship_score=relationship_score,
             name=name,
             is_humor=is_humor,
+            user_id=user_id,        # NUEVO v0.9.0
         )
 
         # PRIORIDAD 8 — Enriquecer
@@ -1993,8 +1995,7 @@ class DecisionEngine:
                 profile=profile,
             )
 
-        # PRIORIDAD 9 — Decorador nocturno (v0.8.2: con cooldown)
-        # Se añade AL FINAL sin pisar la respuesta principal.
+        # PRIORIDAD 9 — Decorador nocturno
         if night_comment and action in ("respond", "direct_answer", "initiative", "opinion", "memory_check"):
             response = f"{response} {night_comment}"
 
@@ -2002,7 +2003,7 @@ class DecisionEngine:
                             emotion, relationship_score, action=action)
 
     # ============================================================
-    # ENRIQUECIMIENTO
+    # ENRIQUECIMIENTO v0.9.0
     # ============================================================
 
     def _enrich_response(
@@ -2031,8 +2032,7 @@ class DecisionEngine:
         if has_question:
             return response
 
-        # 7b — Recall semántico (NUEVO v0.8.2 — prioridad sobre quote recall)
-        # Usa hechos estructurados para mencionar algo específico del usuario.
+        # 7b — Recall semántico
         semantic_cooldown = getattr(settings, "COOLDOWN_SEMANTIC_RECALL", 6)
         semantic_facts = getattr(profile, "semantic_facts", {}) if profile else {}
         if (
@@ -2041,7 +2041,6 @@ class DecisionEngine:
             and self._cooldown_ok(user_id, "semantic", msg_n, semantic_cooldown)
             and random.random() < 0.20
         ):
-            # Elegir un hecho al azar para mencionar naturalmente
             key = random.choice(list(semantic_facts.keys()))
             val = semantic_facts[key]
             fact_natural = self.semantic_memory._fact_to_human(key, val)
@@ -2054,7 +2053,7 @@ class DecisionEngine:
                 self._mark_cooldown(user_id, "semantic", msg_n)
                 return f"{response} {random.choice(semantic_inserts)}"
 
-        # 7c — Quote recall (v0.8.0, ahora con cooldown)
+        # 7c — Quote recall
         quote_cooldown = getattr(settings, "COOLDOWN_QUOTE_RECALL", 8)
         if (
             important_quotes
@@ -2076,17 +2075,34 @@ class DecisionEngine:
                 self._topic_question_history[user_id] = history[-5:]
                 return f"{response} {tq}"
 
-        # 7e — Curiosidad general (ahora con cooldown)
+        # ─────────────────────────────────────────────────────────────
+        # 7e — PERSONALIDAD VIVA (v0.9.0)
+        # Sofía alterna entre compartir algo de sí misma y hacer preguntas.
+        # ─────────────────────────────────────────────────────────────
+        persona_cooldown   = getattr(settings, "COOLDOWN_PERSONA_SHARE", 5)
         curiosity_cooldown = getattr(settings, "COOLDOWN_CURIOSITY_Q", 4)
+
         if (
             "?" not in message
             and sentiment is not None and sentiment >= 0
+            and emotion.trust >= settings.CURIOSITY_TRUST_MIN
+            and self._cooldown_ok(user_id, "persona", msg_n, persona_cooldown)
+            and random.random() < 0.35
+        ):
+            self._mark_cooldown(user_id, "persona", msg_n)
+            msg_count = self._msg_counter.get(user_id, 0)
+            share = sofia_self_share(emotion.trust, msg_count)
+            return f"{response} {share}"
+
+        elif (
+            "?" not in message
+            and sentiment is not None and sentiment >= -0.1
             and emotion.trust >= settings.CURIOSITY_TRUST_MIN
             and traits.get("curiosity", 50) > 50
             and self._cooldown_ok(user_id, "curiosity", msg_n, curiosity_cooldown)
             and random.random() < settings.CURIOSITY_TRIGGER_PROB
         ):
-            question = self._contextual_question(keywords, sentiment, context)
+            question = self._contextual_question(keywords, sentiment, context, emotion)
             self._mark_cooldown(user_id, "curiosity", msg_n)
             return f"{response} {question}"
 
@@ -2099,28 +2115,17 @@ class DecisionEngine:
     def _inject_name(self, text: str, name: str) -> str:
         return text.replace("{name}", name)
 
-    # ── Cooldown helpers (NUEVO v0.8.2) ──────────────────────────
-
     def _cooldown_ok(self, user_id: str, output_type: str, current_msg_n: int, min_gap: int) -> bool:
-        """Retorna True si el cooldown para este tipo de output ya pasó."""
         cd = self._output_cooldowns.setdefault(user_id, {})
         last_used = cd.get(output_type, -999)
         return (current_msg_n - last_used) >= min_gap
 
     def _mark_cooldown(self, user_id: str, output_type: str, current_msg_n: int):
-        """Registra que este tipo de output se usó en el mensaje actual."""
         self._output_cooldowns.setdefault(user_id, {})[output_type] = current_msg_n
 
     def _get_night_comment_if_due(
         self, user_id: str, msg_n: int, trust: float, name: str, emotion_engine
     ) -> Optional[str]:
-        """
-        FIX BUG-5: Retorna comentario nocturno SOLO si:
-        1. Es modo noche.
-        2. Pasó el cooldown (COOLDOWN_NIGHT_COMMENT mensajes desde el último).
-        3. Random < 0.30.
-        Si retorna algo, registra el cooldown.
-        """
         if not (emotion_engine and emotion_engine.is_night_mode()):
             return None
         cooldown = getattr(settings, "COOLDOWN_NIGHT_COMMENT", 5)
@@ -2133,10 +2138,6 @@ class DecisionEngine:
         return comment
 
     def _night_comment(self, trust: float, name: str) -> Optional[str]:
-        """
-        v0.8.1 — Comentario nocturno CORTO para añadir al final de la respuesta.
-        No reemplaza la respuesta, la decora.
-        """
         trust_high = trust > 70
         comentarios_high = [
             f"Por cierto {name}… ya es tarde, ¿no deberías descansar?",
@@ -2154,7 +2155,6 @@ class DecisionEngine:
         return pick(opciones)
 
     def _daily_secrets_reset(self, user_id: str):
-        """FIX: resetea secrets_revealed si cambió el día."""
         today = date.today()
         last_date = self._secrets_date.get(user_id)
         if last_date != today:
@@ -2209,17 +2209,40 @@ class DecisionEngine:
         else:
             return pick(RECOVERY_RESPONSES["phase_3"])
 
-    def _contextual_question(self, keywords: list, sentiment: float, context: dict) -> str:
+    def _contextual_question(
+        self,
+        keywords: list,
+        sentiment: float,
+        context: dict,
+        emotion: EmotionalState = None,
+    ) -> str:
+        # NUEVO v0.9.0: reacciones con algo de Sofía misma
+        if emotion and random.random() < getattr(settings, "SOFIA_REACTION_PROB", 0.25):
+            emo_val = emotion.primary_emotion.value if emotion else "neutral"
+            return sofia_reaction_with_self(emo_val)
+
         if sentiment > 0.5:
-            return pick(["¿Cómo te sientes con eso?", "¿Eso te hizo feliz?"])
+            return pick([
+                "¿Eso te hizo feliz de verdad?",
+                "Oye, ¿cómo te sentiste con eso?",
+                "¿Eso lo esperabas o fue sorpresa?",
+            ])
         if sentiment < -0.3:
-            return pick(["¿Estás bien?", "¿Cómo te dejó eso?"])
+            return pick([
+                "¿Estás bien?",
+                "¿Cómo te dejó eso?",
+                "¿Pudiste hablarlo con alguien?",
+            ])
         if context.get("repetition_level", 0) > 0:
-            return pick(["¿Qué quieres realmente decirme?", "¿Hay algo más detrás de eso?"])
+            return pick([
+                "¿Qué quieres realmente decirme?",
+                "¿Hay algo más detrás de eso?",
+                "Mm… siento que hay algo que no me estás diciendo.",
+            ])
         return pick(CURIOSITY_QUESTIONS)
 
     # ============================================================
-    # GENERACIÓN DE RESPUESTAS
+    # GENERACIÓN DE RESPUESTAS v0.9.0
     # ============================================================
 
     def _generate_response(
@@ -2234,6 +2257,7 @@ class DecisionEngine:
         relationship_score: float,
         name: str = "tú",
         is_humor: bool = False,
+        user_id: str = None,    # NUEVO v0.9.0
     ) -> str:
 
         trust_lvl = trust_level(emotion.trust)
@@ -2258,14 +2282,21 @@ class DecisionEngine:
         opciones      = emo_templates.get(trust_lvl, emo_templates.get("trust_mid", ["Mm…"]))
         base          = self._inject_name(pick(opciones), name)
 
-        # NUEVO: tono más juguetón si el usuario está en modo humor
         if is_humor and emotion.trust > 50:
-            humor_extras = [
-                "jeje", "😄", "ja", "qué bueno eso jeje",
-            ]
+            humor_extras = ["jeje", "😄", "ja", "qué bueno eso jeje"]
             base = base.rstrip() + f" {random.choice(humor_extras)}"
 
-        return self._wrap(base, energy, emotion.trust, context, important_facts, traits, empathy_bonus)
+        # NUEVO v0.9.0 — Humor del día (probabilidad baja, solo en estado neutral/feliz)
+        if (
+            user_id
+            and emo in ("neutral", "happy")
+            and emotion.trust > 40
+            and random.random() < getattr(settings, "SOFIA_MOOD_SHARE_PROB", 0.12)
+        ):
+            mood_expr = sofia_mood_expression(user_id)
+            base = f"{mood_expr} {base}"
+
+        return self._wrap(base, energy, emotion.trust, context, {}, traits, empathy_bonus)
 
     def _wrap(
         self,
@@ -2289,14 +2320,30 @@ class DecisionEngine:
             if ctx_phrase:
                 parts.append(ctx_phrase)
 
+        # FIX v0.9.0: _wrap ya NO añade fact recalls.
+        # Eso lo maneja _enrich_response con cooldowns.
+        # Solo añade MARCA_PERSONAL si hay sensibilidad alta.
         if energy > 60 and trust > 60:
-            extra = self._pick_extra(important_facts, traits, empathy_bonus)
+            extra = self._pick_extra_safe(traits, empathy_bonus)
             if extra:
                 parts.append(extra)
 
         return " ".join(p for p in parts if p)
 
+    def _pick_extra_safe(self, traits: dict, empathy_bonus: float) -> str:
+        """
+        FIX v0.9.0: Versión sin fact-recall para evitar doble recall.
+        Solo añade curiosidad o marca personal.
+        """
+        extras = []
+        if traits.get("curiosity", 50) > 55:
+            extras.append(pick(["¿Y luego qué pasó?", "Cuéntame más, ¿ok?"]))
+        if traits.get("sensitivity", 50) > 65 and empathy_bonus >= 0:
+            extras.append(pick(MARCA_PERSONAL))
+        return pick(extras) if extras else ""
+
     def _pick_context_phrase(self, context: Dict[str, Any]) -> str:
+        from config.sofia_voice import CONTEXTO
         if context.get("push_pull"):
             return pick(CONTEXTO["push_pull"])
         rep = context.get("repetition_level", 0)
@@ -2308,19 +2355,6 @@ class DecisionEngine:
             key = "swing_positivo" if context.get("swing_direction") == "positive" else "swing_negativo"
             return pick(CONTEXTO[key])
         return ""
-
-    def _pick_extra(self, important_facts: dict, traits: dict, empathy_bonus: float) -> str:
-        extras = []
-        if important_facts:
-            relevant = {k: v for k, v in important_facts.items() if v >= settings.FACT_WEIGHT_THRESHOLD}
-            if relevant:
-                top_fact = max(relevant, key=relevant.get)
-                extras.append(f"Oye, recuerdo que {top_fact}. ¿Cómo va eso?")
-        if traits.get("curiosity", 50) > 55:
-            extras.append(pick(["¿Y luego qué pasó?", "Cuéntame más, ¿ok?"]))
-        if traits.get("sensitivity", 50) > 65 and empathy_bonus >= 0:
-            extras.append(pick(MARCA_PERSONAL))
-        return pick(extras) if extras else ""
 
     def _get_secret(self) -> str:
         secrets = [
@@ -2407,7 +2441,7 @@ class DecisionEngine:
         return context
 
 
-        # core/emotion_engine.py
+           # core/emotion_engine.py
 # ============================================================
 # SocialBot v0.8.0
 # FIX: Indentación rota del archivo original (emotion_engine estaba
@@ -2675,7 +2709,8 @@ class Memory:
 
         return sum(sentiments) / len(sentiments)
 
-# config/personality_core.py
+
+        # config/personality_core.py
 # Valores base de la personalidad de Sofía (no cambian por usuario)
 PERSONALITY_CORE = {
     "attachment": 30.0,        # tendencia a establecer vínculos
@@ -2684,8 +2719,6 @@ PERSONALITY_CORE = {
     "sensitivity": 50.0,       # sensibilidad emocional
     "depth": 65.0,             # tendencia a reflexionar
 }
-
-
 
 # core/session_manager.py
 # ============================================================
@@ -3225,7 +3258,8 @@ class UserProfileManager:
 
         return modifiers
 
-# models/interaction.py
+
+        # models/interaction.py
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -3265,8 +3299,7 @@ class Interaction:
         )
 
 
-
-# models/state.py
+        # models/state.py
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
@@ -3303,11 +3336,14 @@ class EmotionalState:
             last_updated=data.get("last_updated")
         )
 
+
         # models/user_profile.py
 # ============================================================
-# SocialBot v0.8.0
-# NUEVO: important_quotes — lista de frases memorables del usuario.
-#        Sofía puede citarlas: "Oye, una vez dijiste que..."
+# SocialBot v0.9.0
+# CAMBIOS vs v0.8.0:
+#   - FIX BUG: Import corregido de `core.personality_core` a
+#     `config.personality_core` (ruta real del módulo).
+#   - MANTIENE: important_quotes (v0.8.0), semantic_facts (v0.8.2)
 # ============================================================
 
 from dataclasses import dataclass, field
@@ -3340,29 +3376,26 @@ class UserProfile:
     # Daño relacional acumulado
     relationship_damage: float = 0.0
 
-    # NUEVO v0.8.0 — Frases memorables del usuario
-    # Lista de strings: las mejores/más reveladoras cosas que dijo
+    # v0.8.0 — Frases memorables del usuario
     important_quotes: List[str] = field(default_factory=list)
 
-    # NUEVO v0.8.2 — Memoria semántica estructurada {tema: valor}
-    # Ej: {"comida_favorita": "pizza", "deporte_interes": "futbol", "no_tiene_equipo": True}
-    # Permite recalls precisos: "Sé que te gusta la pizza, ¿quieres algo diferente hoy?"
+    # v0.8.2 — Memoria semántica estructurada {tema: valor}
     semantic_facts: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
-            "user_id": self.user_id,
-            "emotional_state": self.emotional_state.to_dict() if self.emotional_state else None,
-            "interaction_count": self.interaction_count,
+            "user_id":             self.user_id,
+            "emotional_state":     self.emotional_state.to_dict() if self.emotional_state else None,
+            "interaction_count":   self.interaction_count,
             "communication_style": self.communication_style,
-            "first_seen": self.first_seen.isoformat() if self.first_seen else None,
-            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
-            "topics": self.topics,
+            "first_seen":          self.first_seen.isoformat() if self.first_seen else None,
+            "last_seen":           self.last_seen.isoformat() if self.last_seen else None,
+            "topics":              self.topics,
             "personality_offsets": self.personality_offsets,
-            "important_facts": self.important_facts,
+            "important_facts":     self.important_facts,
             "relationship_damage": self.relationship_damage,
-            "important_quotes": self.important_quotes,  # NUEVO
-            "semantic_facts": self.semantic_facts,        # NUEVO v0.8.2
+            "important_quotes":    self.important_quotes,
+            "semantic_facts":      self.semantic_facts,
         }
 
     @classmethod
@@ -3393,12 +3426,11 @@ class UserProfile:
 
         relationship_damage = data.get("relationship_damage", 0.0)
 
-        # NUEVO: cargar important_quotes (retrocompatible)
         important_quotes = data.get("important_quotes", [])
         if not isinstance(important_quotes, list):
             important_quotes = []
 
-        # NUEVO v0.8.2: cargar semantic_facts (retrocompatible — dict vacío si no existe)
+        # v0.8.2: semantic_facts (retrocompatible)
         semantic_facts = data.get("semantic_facts", {})
         if not isinstance(semantic_facts, dict):
             semantic_facts = {}
@@ -3418,12 +3450,15 @@ class UserProfile:
             semantic_facts=semantic_facts,
         )
 
+
         # storage/database.py
 # ============================================================
-# SocialBot v0.8.0
-# NUEVO: Columna important_quotes en user_profiles.
-# NUEVO: Columna last_session_tone en sessions.
-# Ambos retrocompatibles con ALTER TABLE IF NOT EXISTS.
+# SocialBot v0.9.0
+# CAMBIOS vs v0.8.0:
+#   - FIX BUG CRÍTICO: semantic_facts ahora se persiste correctamente.
+#     Añadida columna en user_profiles, migración, y lectura/escritura.
+#   - FIX: Se eliminó la tabla emotional_state global (código muerto).
+#     El estado emocional siempre fue por usuario en user_profiles.
 # ============================================================
 
 import sqlite3
@@ -3470,16 +3505,6 @@ class Database:
             """)
 
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS emotional_state (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    emotion TEXT,
-                    energy REAL,
-                    trust REAL,
-                    last_updated TEXT
-                )
-            """)
-
-            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS user_profiles (
                     user_id TEXT PRIMARY KEY,
                     emotional_state TEXT,
@@ -3491,7 +3516,8 @@ class Database:
                     personality_traits TEXT,
                     important_facts TEXT,
                     relationship_damage REAL DEFAULT 0.0,
-                    important_quotes TEXT
+                    important_quotes TEXT,
+                    semantic_facts TEXT
                 )
             """)
 
@@ -3508,11 +3534,12 @@ class Database:
 
             conn.commit()
 
-            # Migraciones para DBs existentes
+            # Migraciones para DBs existentes (retrocompatibles)
             migrations = [
                 "ALTER TABLE user_profiles ADD COLUMN relationship_damage REAL DEFAULT 0.0",
-                "ALTER TABLE user_profiles ADD COLUMN important_quotes TEXT",    # NUEVO
-                "ALTER TABLE sessions ADD COLUMN last_session_tone TEXT DEFAULT 'neutral'",  # NUEVO
+                "ALTER TABLE user_profiles ADD COLUMN important_quotes TEXT",
+                "ALTER TABLE user_profiles ADD COLUMN semantic_facts TEXT",   # FIX v0.9.0
+                "ALTER TABLE sessions ADD COLUMN last_session_tone TEXT DEFAULT 'neutral'",
             ]
             for migration in migrations:
                 try:
@@ -3520,16 +3547,6 @@ class Database:
                     conn.commit()
                 except sqlite3.OperationalError:
                     pass  # columna ya existe
-
-            # Estado emocional inicial
-            cursor.execute("SELECT * FROM emotional_state WHERE id = 1")
-            if not cursor.fetchone():
-                initial = EmotionalState()
-                cursor.execute("""
-                    INSERT INTO emotional_state (id, emotion, energy, trust, last_updated)
-                    VALUES (1, ?, ?, ?, ?)
-                """, (initial.primary_emotion.value, initial.energy, initial.trust, None))
-                conn.commit()
 
     # --------------------------------------------------
     # INTERACTIONS
@@ -3590,18 +3607,20 @@ class Database:
                 json.dumps(profile.emotional_state.to_dict())
                 if profile.emotional_state else None
             )
-            topics_str   = ",".join(profile.topics) if profile.topics else None
-            traits_json  = json.dumps(profile.personality_offsets) if profile.personality_offsets else None
-            facts_json   = json.dumps(profile.important_facts) if profile.important_facts else None
-            quotes_json  = json.dumps(profile.important_quotes) if profile.important_quotes else None  # NUEVO
+            topics_str     = ",".join(profile.topics) if profile.topics else None
+            traits_json    = json.dumps(profile.personality_offsets) if profile.personality_offsets else None
+            facts_json     = json.dumps(profile.important_facts) if profile.important_facts else None
+            quotes_json    = json.dumps(profile.important_quotes) if profile.important_quotes else None
+            # FIX v0.9.0: semantic_facts ahora se guarda
+            semantic_json  = json.dumps(profile.semantic_facts) if profile.semantic_facts else None
 
             cursor.execute("""
                 INSERT OR REPLACE INTO user_profiles
                 (user_id, emotional_state, interaction_count,
                  communication_style, first_seen, last_seen,
                  topics, personality_traits, important_facts,
-                 relationship_damage, important_quotes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 relationship_damage, important_quotes, semantic_facts)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 profile.user_id,
                 emotional_state_json,
@@ -3614,6 +3633,7 @@ class Database:
                 facts_json,
                 profile.relationship_damage,
                 quotes_json,
+                semantic_json,   # FIX v0.9.0
             ))
             conn.commit()
 
@@ -3624,7 +3644,7 @@ class Database:
                 SELECT user_id, emotional_state, interaction_count,
                        communication_style, first_seen, last_seen,
                        topics, personality_traits, important_facts,
-                       relationship_damage, important_quotes
+                       relationship_damage, important_quotes, semantic_facts
                 FROM user_profiles WHERE user_id = ?
             """, (user_id,))
 
@@ -3637,20 +3657,23 @@ class Database:
             traits_data          = json.loads(row[7]) if row[7] else {}
             facts_data           = json.loads(row[8]) if row[8] else {}
             relationship_damage  = row[9] if row[9] is not None else 0.0
-            quotes_data          = json.loads(row[10]) if row[10] else []  # NUEVO
+            quotes_data          = json.loads(row[10]) if row[10] else []
+            # FIX v0.9.0: semantic_facts ahora se carga (row[11])
+            semantic_data        = json.loads(row[11]) if row[11] else {}
 
             data = {
-                "user_id": row[0],
-                "emotional_state": emotional_state_data,
-                "interaction_count": row[2],
+                "user_id":            row[0],
+                "emotional_state":    emotional_state_data,
+                "interaction_count":  row[2],
                 "communication_style": row[3],
-                "first_seen": row[4],
-                "last_seen": row[5],
-                "topics": topics,
+                "first_seen":         row[4],
+                "last_seen":          row[5],
+                "topics":             topics,
                 "personality_traits": traits_data,
-                "important_facts": facts_data,
+                "important_facts":    facts_data,
                 "relationship_damage": relationship_damage,
-                "important_quotes": quotes_data,
+                "important_quotes":   quotes_data,
+                "semantic_facts":     semantic_data,   # FIX v0.9.0
             }
             return UserProfile.from_dict(data)
 
@@ -3677,7 +3700,7 @@ class Database:
         topics: List[str],
         important_facts: dict,
         session_count: int,
-        last_session_tone: str = "neutral",   # NUEVO
+        last_session_tone: str = "neutral",
     ):
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -3709,17 +3732,17 @@ class Database:
 
             topics = [t.strip() for t in row[2].split(",") if t.strip()] if row[2] else []
             facts  = json.loads(row[3]) if row[3] else {}
-            tone   = row[4] if row[4] else "neutral"  # NUEVO
+            tone   = row[4] if row[4] else "neutral"
 
             return {
-                "date":               datetime.fromisoformat(row[0]),
-                "session_count":      row[1],
-                "topics":             topics,
-                "important_facts":    facts,
-                "last_session_tone":  tone,
+                "date":              datetime.fromisoformat(row[0]),
+                "session_count":     row[1],
+                "topics":            topics,
+                "important_facts":   facts,
+                "last_session_tone": tone,
             }
 
-            # utils/aggression_detector.py
+# utils/aggression_detector.py
 # ============================================================
 # SocialBot v0.8.0
 # FIX CRÍTICO: Uso de word boundaries (re.search con \b) en lugar de
@@ -3824,7 +3847,8 @@ class AggressionDetector:
         return {"detected": False, "level": None, "impact": None, "is_joke": False}
 
 
-        # utils/logger.py
+
+# utils/logger.py
 import logging
 import sys
 from pathlib import Path
@@ -3856,7 +3880,6 @@ def setup_logger(name: str = "social_bot", level=logging.INFO):
 
 # Crear una instancia global para usar en toda la app
 logger = setup_logger()
-
 
 # utils/text_analyzer.py
 # ============================================================
@@ -4284,3 +4307,5 @@ if __name__ == "__main__":
         print("❌ No encontré el token. Crea un .env con DISCORD_TOKEN=tu_token")
     else:
         bot.run(TOKEN)
+
+        

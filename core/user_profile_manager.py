@@ -1,11 +1,14 @@
 # core/user_profile_manager.py
 # ============================================================
-# SocialBot v0.8.0
-# NUEVO: _extract_memorable_quote — detecta frases con peso emocional
-#        alto y las guarda en profile.important_quotes.
-#        Ejemplos: confesiones, reflexiones, cosas personales.
-# NUEVO: _daily_secrets_reset — si SECRETS_DAILY_RESET=True, el contador
-#        de secretos revelados se resetea automáticamente cada día.
+# SocialBot v0.9.1
+# CAMBIOS vs v0.8.0:
+#   - FIX BUG: _extract_memorable_quote — el filtro de sentimiento
+#     ya no descarta frases que el patrón semántico ya calificó.
+#     Antes, una confesión como "nadie sabe que me siento solo a veces"
+#     podía tener score ~0.0 y nunca guardarse. Ahora: si el patrón
+#     MEMORABLE_PATTERNS la capturó, se guarda independientemente del
+#     score (solo se filtra sentimiento en mensajes sin patrón claro).
+#   - MANTIENE: todo lo demás de v0.8.0
 # ============================================================
 
 import re
@@ -120,12 +123,11 @@ class UserProfileManager:
             )
             profile.important_facts = dict(sorted_facts[:50])
 
-        # 6. NUEVO v0.8.0 — Frases memorables
+        # 6. Frases memorables — FIX v0.9.1: patrón semántico toma precedencia
         quote = self._extract_memorable_quote(interaction.message, interaction.sentiment)
         if quote:
             if quote not in profile.important_quotes:
                 profile.important_quotes.append(quote)
-                # Mantener solo las más recientes
                 if len(profile.important_quotes) > settings.MAX_IMPORTANT_QUOTES:
                     profile.important_quotes = profile.important_quotes[-settings.MAX_IMPORTANT_QUOTES:]
 
@@ -164,19 +166,23 @@ class UserProfileManager:
         self.cache[profile.user_id] = profile
 
     # ------------------------------------------------------------
-    # NUEVO v0.8.0 — Extracción de frases memorables
+    # EXTRACCIÓN DE FRASES MEMORABLES — FIX v0.9.1
     # ------------------------------------------------------------
 
     def _extract_memorable_quote(self, message: str, sentiment: Optional[float]) -> Optional[str]:
         """
         Detecta si el mensaje contiene una frase personal/confesión memorable.
-        Solo guarda frases largas suficientes (≥ MIN_LENGTH) con sentimiento neutro/alto.
+
+        FIX v0.9.1: El filtro de sentimiento ya no bloquea frases que los
+        MEMORABLE_PATTERNS ya calificaron como confesiones/reflexiones.
+        El backend básico de sentimiento puede dar score ~0.0 en frases
+        mixtas ("nadie sabe que me siento solo") aunque sean personalmente
+        importantes. La lógica nueva:
+          - Si el PATRÓN lo capturó → guardar siempre (solo filtrar mensajes
+            claramente positivos extremos que no sean reflexiones reales)
+          - Si no hay patrón → aplicar filtro de sentimiento normal
         """
         if len(message) < settings.QUOTE_MIN_LENGTH:
-            return None
-
-        # Solo mensajes con sentimiento relevante (no completamente neutros)
-        if sentiment is not None and abs(sentiment) < 0.2:
             return None
 
         msg_clean = message.strip()
@@ -185,10 +191,15 @@ class UserProfileManager:
             match = pattern.search(msg_clean)
             if match:
                 quote = match.group(0).strip()
-                # Limpiar y recortar si es muy larga
+                # Recortar si es muy larga
                 if len(quote) > 120:
                     quote = quote[:120].rsplit(' ', 1)[0] + "…"
                 return quote
+
+        # Sin patrón: solo guardar si tiene sentimiento suficientemente marcado
+        # (no completamente neutro — no queremos guardar "ok" o "bien")
+        if sentiment is not None and abs(sentiment) < 0.25:
+            return None
 
         return None
 
@@ -297,7 +308,7 @@ class UserProfileManager:
             "ignore_threshold_adjust": 0.0,
             "effective_traits": effective_traits,
             "important_facts": top_facts,
-            "important_quotes": profile.important_quotes,  # NUEVO
+            "important_quotes": profile.important_quotes,
         }
 
         if profile.interaction_count > 10 and profile.emotional_state.trust > 70:

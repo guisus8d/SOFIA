@@ -1,11 +1,15 @@
 # core/session_manager.py
 # ============================================================
-# SocialBot v0.8.0
-# FIX: get_greeting usaba session_count donde debía usar days.
-#      "Ya llevamos 47 días" cuando eran 47 sesiones → corregido.
-# NUEVO: last_session_tone — Sofía recuerda cómo terminó la conversación.
-#        Si el usuario se fue enojado: "La última vez no quedamos muy bien..."
-# NUEVO: Saludos según hora del día (modo noche).
+# SocialBot v0.9.1
+# CAMBIOS vs v0.8.0:
+#   - FIX BUG: Reconciliación ahora tiene prioridad sobre modo noche.
+#     Antes, si el usuario regresaba de noche después de irse enojado,
+#     recibía saludo genérico nocturno en vez de "la última vez no
+#     quedamos muy bien". Ahora la reconciliación siempre aparece primero.
+#   - FIX BUG: Las 5am ya no clasifican como "noche". Antes el rango
+#     madrugada (0-4) y noche (>=22 o <6) se solapaban en la hora 5,
+#     dejándola huérfana de madrugada. Corregido a <6 consistente.
+#   - MANTIENE: todo lo demás de v0.8.0
 # ============================================================
 
 from datetime import datetime
@@ -44,13 +48,13 @@ SALUDOS = {
         "Hola 😊 ¿Sabías que ya llevamos {days} días? Qué padre.",
         "Holi. {days} días ya, ¿cómo estás hoy?",
     ],
-    # NUEVO v0.8.0 — Saludos de reconciliación
+    # Saludos de reconciliación
     "reconciliacion": [
         "Hola… la última vez no quedamos muy bien. ¿Estás mejor?",
         "Oye… la otra vez me quedé pensando. ¿Todo ok?",
         "Holi. Espero que hoy sea mejor que la última vez. ¿Cómo estás?",
     ],
-    # NUEVO v0.8.0 — Saludos nocturnos
+    # Saludos nocturnos
     "noche": [
         "Oye… es tarde. ¿Estás bien?",
         "Mm… ¿sin poder dormir?",
@@ -76,37 +80,42 @@ class SessionManager:
     def get_greeting(self, user_id: str) -> str:
         """
         Prioridad:
-          1. Modo noche / madrugada (hora actual)
-          2. Reconciliación si última sesión fue negativa
+          1. Reconciliación si última sesión fue negativa  ← FIX: ahora es PRIMERA prioridad
+          2. Modo noche / madrugada (hora actual)
           3. Días hablando (si son ≥ 3 sesiones)
           4. Tema relevante de la última sesión
           5. Usuario conocido sin temas
           6. Usuario nuevo
         """
-        # 1. Modo noche
-        night_greeting = self._night_greeting()
-        if night_greeting:
-            return night_greeting
-
         session = self.db.load_last_session(user_id)
 
         if not session:
+            # Usuario nuevo — verificar hora antes de dar bienvenida genérica
+            night_greeting = self._night_greeting()
+            if night_greeting:
+                return night_greeting
             return pick(SALUDOS["nuevo"])
+
+        last_tone = session.get("last_session_tone", "neutral")
+
+        # 1. Reconciliación — prioridad máxima, no importa la hora
+        if last_tone == "negative":
+            return pick(SALUDOS["reconciliacion"])
+
+        # 2. Modo noche / madrugada
+        night_greeting = self._night_greeting()
+        if night_greeting:
+            return night_greeting
 
         days          = self._days_since(session["date"])
         session_count = session.get("session_count", 1)
         topics        = session.get("topics", [])
         facts         = session.get("important_facts", {})
-        last_tone     = session.get("last_session_tone", "neutral")
 
-        # 2. Reconciliación
-        if last_tone == "negative":
-            return pick(SALUDOS["reconciliacion"])
-
-        # 3. Días hablando (FIX: usamos `days`, no `session_count`)
+        # 3. Días hablando (FIX histórico: usamos `days`, no `session_count`)
         if session_count >= 3:
             frase = pick(SALUDOS["dias_hablando"])
-            return frase.format(days=days)   # ← FIX: era session_count
+            return frase.format(days=days)
 
         # 4. Tema relevante
         top_topic = self._pick_top_topic(topics, facts)
@@ -142,11 +151,17 @@ class SessionManager:
     # --------------------------------------------------------
 
     def _night_greeting(self) -> Optional[str]:
-        """Retorna saludo nocturno según la hora actual."""
+        """
+        Retorna saludo nocturno según la hora actual.
+        FIX v0.9.1: madrugada cubre 0-5, noche cubre 22-23 y se solapa
+        con el inicio correcto del día (hour < 6 para ambos rangos nocturnos).
+        """
         hour = datetime.now().hour
-        if 0 <= hour < 5:
+        # Madrugada: 00:00 - 05:59
+        if 0 <= hour < 6:
             return pick(SALUDOS["madrugada"])
-        if hour >= settings.NIGHT_MODE_START_HOUR or hour < settings.NIGHT_MODE_END_HOUR:
+        # Noche: 22:00 - 23:59
+        if hour >= settings.NIGHT_MODE_START_HOUR:
             return pick(SALUDOS["noche"])
         return None
 
