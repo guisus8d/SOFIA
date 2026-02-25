@@ -152,8 +152,13 @@ class EmotionEngine:
         if hours_passed <= 0:
             return
         decay_factor = self.mood_decay ** hours_passed
+        # FIX BUG 12: el decay solo afecta energía (estado de ánimo del momento),
+        # no la confianza (relación construida). Un usuario que no habla por días
+        # no debería recibir respuestas hostiles porque su trust llegó a 0.
         state.energy = self._clamp(state.energy * decay_factor)
-        state.trust  = self._clamp(state.trust  * decay_factor)
+        # trust decae mucho más lentamente: 1% por hora en vez del 5%
+        slow_trust_decay = 0.99 ** hours_passed
+        state.trust  = self._clamp(state.trust * slow_trust_decay)
 
     def _update_primary_emotion(self, state: EmotionalState):
         e = state.energy

@@ -127,6 +127,8 @@ async def process_message(user_id: str, message: str, display_name: str = "tú")
         aggression_impact=aggression_impact,
     )
 
+    # FIX BUG 1: ahora que ya tenemos el estado emocional nuevo, actualizamos
+    # emotion_after en la interacción antes de guardarla en memoria/BD.
     interaction.emotion_after = new_state.primary_emotion.value
     profile.emotional_state   = new_state
 

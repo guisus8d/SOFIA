@@ -590,7 +590,14 @@ class TopicLock:
         nuevo    = self._topic_name(new_topic)
         frase    = random.choice(self.TOPIC_CHANGE_COMMENTS)
         result   = frase.format(anterior=anterior, nuevo=nuevo)
-        result   = result.replace(" a el ", " al ").replace(" de el ", " del ")
+        # FIX BUG 9: normalizar artículos duplicados que aparecen cuando
+        # TOPIC_NAMES ya incluye artículo ("el fútbol") y el template también
+        # lo añade ("lo del {nuevo}" → "lo del el fútbol").
+        result   = result.replace(" de el ", " del ")
+        result   = result.replace(" del el ", " del ")
+        result   = result.replace(" de la la ", " de la ")
+        result   = result.replace(" a el ", " al ")
+        result   = result.replace(" al el ", " al ")
         return result
 
     def get_topic_question(self, topic: str, previous_responses: list = None) -> Optional[str]:
