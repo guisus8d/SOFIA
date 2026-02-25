@@ -80,7 +80,6 @@ SECRETS_DAILY_RESET        = True   # Si True, secrets_revealed se resetea cada 
 
 
 
-
 # config/sofia_voice.py
 # ============================================================
 # SocialBot v0.5.7
@@ -1077,8 +1076,6 @@ from config.sofia_voice import (
     MOMENTUM_DEPTH_PROMPTS,
     get_opinion,
     OPINIONES,
-)
-from config.sofia_voice_patch import (
     QUOTE_RECALL_PHRASES,
     NIGHT_RESPONSES,
     RESPUESTAS_NOCHE,
@@ -1769,6 +1766,7 @@ class DecisionEngine:
 
 
 
+
         # core/emotion_engine.py
 # ============================================================
 # SocialBot v0.8.0
@@ -2253,7 +2251,8 @@ class SessionManager:
         return fact
 
 
-        # core/user_profile_manager.py
+
+# core/user_profile_manager.py
 # ============================================================
 # SocialBot v0.8.0
 # NUEVO: _extract_memorable_quote — detecta frases con peso emocional
@@ -2589,7 +2588,7 @@ class UserProfileManager:
         return modifiers
 
 
-        # models/interaction.py
+# models/interaction.py
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -2667,7 +2666,7 @@ class EmotionalState:
         )
 
 
-        # models/user_profile.py
+# models/user_profile.py
 # ============================================================
 # SocialBot v0.8.0
 # NUEVO: important_quotes — lista de frases memorables del usuario.
@@ -3072,8 +3071,7 @@ class Database:
                 "last_session_tone":  tone,
             }
 
-
-            # utils/aggression_detector.py
+# utils/aggression_detector.py
 # ============================================================
 # SocialBot v0.8.0
 # FIX CRÍTICO: Uso de word boundaries (re.search con \b) en lugar de
@@ -3176,9 +3174,7 @@ class AggressionDetector:
                     }
 
         return {"detected": False, "level": None, "impact": None, "is_joke": False}
-
-
-        # utils/logger.py
+# utils/logger.py
 import logging
 import sys
 from pathlib import Path
@@ -3210,6 +3206,8 @@ def setup_logger(name: str = "social_bot", level=logging.INFO):
 
 # Crear una instancia global para usar en toda la app
 logger = setup_logger()
+
+
 
 # utils/text_analyzer.py
 # ============================================================
@@ -3439,6 +3437,7 @@ class TextAnalyzer:
             multiplier *= settings.AFFECTION_MULTIPLIER
         return multiplier
 
+
 # discord_bot.py
 # ============================================================
 # SocialBot v0.8.0
@@ -3633,6 +3632,3 @@ if __name__ == "__main__":
         print("❌ No encontré el token. Crea un .env con DISCORD_TOKEN=tu_token")
     else:
         bot.run(TOKEN)
-
-
-        

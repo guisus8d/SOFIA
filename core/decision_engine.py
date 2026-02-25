@@ -1,13 +1,13 @@
 # core/decision_engine.py
 # ============================================================
-# SocialBot v0.8.0
-# FIX: secrets_revealed se resetea diariamente (si SECRETS_DAILY_RESET=True).
-#      Antes no había mecanismo de reset temporal.
-# NUEVO: Quote recall — Sofía cita frases memorables del usuario.
-# NUEVO: mood_reason — respuestas que referencian el estado emocional.
-# NUEVO: Modo noche — respuestas más íntimas/tranquilas de noche.
-# NUEVO: Detección de humor del usuario — Sofía responde más juguetona.
-# NUEVO: Silencio intencional ante mensajes muy impactantes.
+# SocialBot v0.8.1
+# CAMBIOS vs v0.8.0:
+#   - PRIORIDAD 1.5: detector "cuéntame algo" — usa SOFIA_THOUGHTS
+#     para dar iniciativa propia cuando el usuario pide que cuente algo.
+#   - PRIORIDAD 4.5: detector pregunta directa — responde literal primero
+#     antes de cualquier fallback emocional. Usa DIRECT_QUESTIONS.
+#   - Importaciones actualizadas: detect_direct_question, get_sofia_thought,
+#     is_cuentame_trigger.
 # ============================================================
 
 from datetime import datetime, date
@@ -31,6 +31,9 @@ from config.sofia_voice import (
     QUOTE_RECALL_PHRASES,
     NIGHT_RESPONSES,
     RESPUESTAS_NOCHE,
+    detect_direct_question,      # NUEVO v0.8.1
+    get_sofia_thought,           # NUEVO v0.8.1
+    is_cuentame_trigger,         # NUEVO v0.8.1
 )
 import random
 import time
@@ -263,6 +266,13 @@ class DecisionEngine:
                                 self._inject_name(identity_response, name),
                                 emotion, relationship_score, action="identity")
 
+        # PRIORIDAD 1.5 — "Cuéntame algo" / iniciativa propia (NUEVO v0.8.1)
+        # Sofía responde con un pensamiento propio antes de cualquier otra lógica.
+        if is_cuentame_trigger(message):
+            thought = get_sofia_thought()
+            return self._return(user_id, message, sentiment, thought,
+                                emotion, relationship_score, action="initiative")
+
         # PRIORIDAD 2 — Modo noche (respuesta íntima)
         if emotion_engine and emotion_engine.is_night_mode():
             night_resp = self._night_response(emotion.trust, name)
@@ -316,6 +326,23 @@ class DecisionEngine:
             self.recovery_needed[user_id] = rec_needed
             if rec_needed == 0:
                 self.aggression_count[user_id] = 0
+
+        # PRIORIDAD 4.5 — Pregunta directa concreta (NUEVO v0.8.1)
+        # Responde literal primero. Luego puede añadir personalidad.
+        # Aplica siempre, independiente del estado emocional.
+        direct_answer = detect_direct_question(message)
+        if direct_answer:
+            # Toque de personalidad ocasional al final
+            if random.random() < 0.4:
+                toques = [
+                    " ¿Algo más que quieras saber?",
+                    " ¿Te sirve eso?",
+                    " ¿Hay algo más?",
+                    " ¿Eso era lo que buscabas?",
+                ]
+                direct_answer += random.choice(toques)
+            return self._return(user_id, message, sentiment, direct_answer,
+                                emotion, relationship_score, action="direct_answer")
 
         # PRIORIDAD 5 — Opinión / tema
         if agg_count == 0 and rec_needed == 0:
