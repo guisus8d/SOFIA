@@ -39,6 +39,11 @@ class UserProfile:
     # Lista de strings: las mejores/más reveladoras cosas que dijo
     important_quotes: List[str] = field(default_factory=list)
 
+    # NUEVO v0.8.2 — Memoria semántica estructurada {tema: valor}
+    # Ej: {"comida_favorita": "pizza", "deporte_interes": "futbol", "no_tiene_equipo": True}
+    # Permite recalls precisos: "Sé que te gusta la pizza, ¿quieres algo diferente hoy?"
+    semantic_facts: Dict[str, str] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
         return {
             "user_id": self.user_id,
@@ -52,6 +57,7 @@ class UserProfile:
             "important_facts": self.important_facts,
             "relationship_damage": self.relationship_damage,
             "important_quotes": self.important_quotes,  # NUEVO
+            "semantic_facts": self.semantic_facts,        # NUEVO v0.8.2
         }
 
     @classmethod
@@ -87,6 +93,11 @@ class UserProfile:
         if not isinstance(important_quotes, list):
             important_quotes = []
 
+        # NUEVO v0.8.2: cargar semantic_facts (retrocompatible — dict vacío si no existe)
+        semantic_facts = data.get("semantic_facts", {})
+        if not isinstance(semantic_facts, dict):
+            semantic_facts = {}
+
         return cls(
             user_id=data["user_id"],
             emotional_state=emotional_state,
@@ -99,4 +110,5 @@ class UserProfile:
             important_facts=important_facts,
             relationship_damage=relationship_damage,
             important_quotes=important_quotes,
+            semantic_facts=semantic_facts,
         )

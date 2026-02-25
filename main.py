@@ -160,6 +160,10 @@ async def reset_cmd(ctx):
     decision.secrets_revealed.pop(user_id, None)
     decision._secrets_date.pop(user_id, None)          # NUEVO
     decision._topic_question_history.pop(user_id, None)
+
+    decision._output_cooldowns.pop(user_id, None)
+    decision._msg_counter.pop(user_id, None)
+    
     await ctx.send("🔄 Contadores reseteados.")
 
 

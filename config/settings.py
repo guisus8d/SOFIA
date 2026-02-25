@@ -18,7 +18,7 @@ LOG_DIR  = BASE_DIR / "logs"
 DATABASE_PATH = DATA_DIR / "bot_data.db"
 
 BOT_NAME = "SocialBot"
-VERSION  = "0.8.0"   # FIX: era "0.5.4" — desincronizado con el header
+VERSION  = "0.8.2"
 
 INITIAL_ENERGY = 50.0
 INITIAL_TRUST  = 50.0
@@ -77,3 +77,31 @@ SENTIMENT_BACKEND          = "basic"
 
 # ── Secrets reset diario (NUEVO v0.8.0) ──────────────────────────
 SECRETS_DAILY_RESET        = True   # Si True, secrets_revealed se resetea cada día
+
+# ── Memoria Semántica (NUEVO v0.8.2) ─────────────────────────────
+# Extrae hechos estructurados {tema: valor} de los mensajes del usuario.
+# Permite respuestas como "Sé que te gusta la pizza" en vez de buscar
+# frases exactas guardadas.
+SEMANTIC_FACTS_MAX         = 20     # máximo de hechos semánticos por usuario
+SEMANTIC_CONFIDENCE_MIN    = 0.6    # confianza mínima para guardar un hecho
+SEMANTIC_RECALL_ON_CHECK   = True   # activar recall automático en memory_check intent
+
+# ── Intent Classifier (NUEVO v0.8.2) ─────────────────────────────
+# Prioridad explícita: memory_check > identity > topic > fallback
+# Evita que un "te acuerdas de la pizza" dispare el topic_lock de comida.
+INTENT_PRIORITY = [
+    "memory_check",    # "¿recuerdas...?" / "¿te acuerdas...?" / "¿sabes algo de mí?"
+    "identity",        # "¿cómo te llamas?" / "eres un bot?" etc
+    "cuentame",        # "cuéntame algo" / "dime algo"
+    "direct_question", # preguntas concretas con respuesta directa
+    "opinion",         # temas con opinión registrada
+    "topic",           # topic lock
+    "fallback",        # respuesta base
+]
+
+# ── Cooldowns por tipo de output (NUEVO v0.8.2) ──────────────────
+# Evita que el mismo tipo de extensión se repita demasiado seguido.
+COOLDOWN_NIGHT_COMMENT     = 5      # mensajes mínimos entre comentarios nocturnos
+COOLDOWN_QUOTE_RECALL      = 8      # mensajes mínimos entre quote recalls
+COOLDOWN_CURIOSITY_Q       = 4      # mensajes mínimos entre preguntas de curiosidad
+COOLDOWN_SEMANTIC_RECALL   = 6      # mensajes mínimos entre recalls semánticos

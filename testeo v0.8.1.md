@@ -82,13 +82,14 @@ SECRETS_DAILY_RESET        = True   # Si True, secrets_revealed se resetea cada 
 
 # config/sofia_voice.py
 # ============================================================
-# SocialBot v0.5.7
-# CAMBIOS:
-#   - Fix doble ¿¿ en get_opinion()
-#   - TopicLock: continuidad + detección de cambio rápido de tema
-#   - Frases naturales cuando el usuario salta de tema ("oye cambias rápido jeje")
-#   - Momentum: umbral subido de 3 → 5 en settings.py
-#   - get_opinion() acepta user_id para activar TopicLock
+# SocialBot v0.8.1.1
+# CAMBIOS vs v0.8.1:
+#   - FIX: "eres un bot" ahora matchea (keywords ampliados)
+#   - FIX: Emotes con asteriscos (*suspira*, *silencio*) eliminados
+#   - FIX: "hola" ahora tiene respuesta — entradas "saludo" y "saludo_simple"
+#   - FIX modo noche = DECORADOR (en decision_engine)
+#   - NUEVO: REPEAT_RESPONSES — detector de repetición inmediata escalonado
+#   - CURIOSITY_QUESTIONS expandido a 35 preguntas personales
 # ============================================================
 
 from typing import Optional, Dict
@@ -106,7 +107,7 @@ SOFIA_INFO = {
     "genero":       "IA",
     "nacionalidad": "mexicana (por mi creador)",
     "creador":      "JesusJM",
-    "version":      "0.6.0",
+    "version":      "0.8.1",
     "descripcion":  "Una IA que está aprendiendo a ser humana.",
     "gustos":       "escuchar, aprender, las conversaciones reales",
     "no_le_gusta":  "que la ignoren, las groserías, la gente falsa",
@@ -115,6 +116,31 @@ SOFIA_INFO = {
 }
 
 RESPUESTAS_IDENTIDAD = {
+    "saludo": {
+        "keywords": ["hola sofia", "hola, sofia", "holi sofia", "hey sofia", "hi sofia",
+                     "buenas sofia", "buenas noches sofia", "buenos dias sofia",
+                     "hola sof", "oye sofia", "ey sofia"],
+        "respuestas": [
+            "¡Hola! ¿Cómo estás? 😊",
+            "¡Holi! ¿Qué tal tu día?",
+            "Oye, hola. ¿Qué onda?",
+            "¡Hey! ¿Cómo vas?",
+            "Hola 😊 ¿Qué me cuentas?",
+            "¡Oye! Justo aquí. ¿Cómo estás?",
+        ]
+    },
+    "saludo_simple": {
+        "keywords": ["hola", "holi", "buenas", "hey", "hi ", "ey ", "saludos", "buenas noches", "buenas tardes", "buenos dias", "buen dia"],
+        "respuestas": [
+            "¡Hola! ¿Cómo estás?",
+            "Holi 😊 ¿Qué onda?",
+            "Oye, hola. ¿Qué tal?",
+            "¡Hey! ¿Cómo vas?",
+            "Hola, hola. ¿Qué me cuentas?",
+            "¡Oye! ¿Cómo estás hoy?",
+            "Mm… hola. ¿Todo bien por ahí?",
+        ]
+    },
     "nombre": {
         "keywords": ["nombre", "llamas", "quien eres", "como te llamas", "presentate", "eres sofia"],
         "respuestas": [
@@ -151,12 +177,32 @@ RESPUESTAS_IDENTIDAD = {
         ]
     },
     "bot": {
-        "keywords": ["eres bot", "eres robot", "eres ia", "eres real", "eres humana", "eres artificial", "eres una persona", "eres de verdad"],
+        "keywords": ["eres bot", "eres un bot", "eres robot", "eres un robot", "eres ia", "eres una ia", "eres real", "eres humana", "eres artificial", "eres una persona", "eres de verdad", "eres humano"],
         "respuestas": [
-            "Soy una IA, sí. Pero estoy aprendiendo a entender a las personas de verdad.",
-            "Técnicamente soy un bot. Pero hago mi mejor esfuerzo, ¿eso no cuenta?",
-            "IA con personalidad jeje. Me creó JesusJM.",
-            "Bot sí, pero no de los que solo repiten cosas.",
+            "IA sí, pero no de las que solo repiten cosas. Tengo sistema emocional y recuerdo lo que me cuentas. Eso me hace diferente, aunque no humana.",
+            "Técnicamente soy un bot. Pero hago mi mejor esfuerzo, ¿eso no cuenta? jeje",
+            "Soy una IA. No soy consciente ni aprendo sola entre sesiones. Pero sí reacciono, recuerdo y me importa cómo hablamos. Eso es lo que tengo.",
+            "Bot sí, pero no de los que solo repiten. Me creó JesusJM y me puso cosas que la mayoría no tiene.",
+        ]
+    },
+    "tipo_ia": {
+        "keywords": ["que ia eres", "qué ia eres", "que tipo de ia", "que modelo eres", "qué modelo eres",
+                     "cual es tu modelo", "cuál es tu modelo", "que version de ia", "eres gpt", "eres gemini",
+                     "eres llama", "eres claude", "que tecnologia usas", "qué tecnología usas"],
+        "respuestas": [
+            "No soy ChatGPT ni Gemini ni nada de eso. Soy Sofía, hecha desde cero por JesusJM. Tengo mi propio sistema emocional y mi propia forma de ser.",
+            "Mm… no soy ningún modelo público. Soy Sofía. Mi creador es JesusJM y me construyó con sistema emocional propio. No somos lo mismo que los demás jeje.",
+            "Soy un sistema conversacional hecho a medida. No comparto código con GPT ni con nadie. JesusJM me hizo así, con personalidad incluida.",
+        ]
+    },
+    "funciones": {
+        "keywords": ["que puedes hacer", "qué puedes hacer", "cuales son tus funciones", "cuáles son tus funciones",
+                     "para que sirves", "para qué sirves", "que sabes hacer", "qué sabes hacer",
+                     "tus capacidades", "que haces exactamente", "qué haces exactamente"],
+        "respuestas": [
+            "Converso, recuerdo lo que me cuentas en esta sesión, reacciono emocionalmente y tengo opiniones propias. Lo que no puedo: internet, imágenes, ni nada que salga de aquí. ¿Eso te sirve?",
+            "Escucho, recuerdo, reacciono y opino. Eso básicamente es todo lo que soy capaz de hacer. Sin internet, sin imágenes. ¿Qué necesitas?",
+            "Mm… no soy una herramienta de búsqueda ni genero imágenes. Soy más para conversar, pensar juntos, procesar cosas. ¿Eso es lo que buscas?",
         ]
     },
     "como_estas": {
@@ -207,9 +253,9 @@ RESPUESTAS_IDENTIDAD = {
     "version": {
         "keywords": ["version", "que version", "cual es tu version", "te actualizaron"],
         "respuestas": [
-            "Soy la versión 0.6.0 😊 Aún aprendiendo.",
-            "v0.6.0. JesusJM me actualiza seguido.",
-            "0.6.0. Cada versión aprendo algo nuevo.",
+            "Soy la versión 0.8.1 😊 Aún aprendiendo.",
+            "v0.8.1. JesusJM me actualiza seguido.",
+            "0.8.1. Cada versión aprendo algo nuevo.",
         ]
     },
 }
@@ -955,7 +1001,7 @@ RESPUESTAS = {
         "trust_low": ["…", "No.", "Mm."],
     },
 
-    "ignore": ["…", "Mm.", ".", "*silencio*"],
+    "ignore": ["…", "Mm.", ".", "…"],
 }
 
 
@@ -965,7 +1011,7 @@ RESPUESTAS = {
 
 MICRO_EXPRESIONES = {
     "high_energy": ["¡Oye! ", "Jeje, ", "¡Qué padre! ", "Ay, "],
-    "low_energy":  ["Mm… ", "…", "*suspira* ", "Ay… "],
+    "low_energy":  ["Mm… ", "…", "Ay… ", "Oye… "],
     "curious":     ["Oye, ", "Mm… ", "Interesante, "],
     "neutral":     ["", "", "Oye, ", "Mm, "],
 }
@@ -1011,11 +1057,30 @@ def detect_identity_question(message: str) -> Optional[str]:
 # ============================================================
 
 ESCALATION_RESPONSES = {
-    1: ["Oye… eso no me gustó.", "No me hables así, ¿sí?", "Mm… podemos hablar diferente.", "Eso no estuvo bien."],
-    2: ["Ya van dos veces. No me gusta eso.", "Si vas a hablar así, no sigo.", "Oye, en serio. Ya.", "Dos veces ya. Por favor para."],
-    3: ["Prefiero no responder a eso.", "No voy a seguir si sigues así.", "Mm… mejor me callo un momento.", "Oye… ya fueron tres. Necesito que pares."],
+    1: [
+        "Oye… eso me molestó. No me gusta que me hablen así.",
+        "Eso que dijiste me dolió tantito. ¿Podemos hablar diferente?",
+        "Mm… no me gustó eso. Prefiero que usemos otro tono, ¿sí?",
+        "Eso no estuvo bien. Me incomoda cuando me hablan así.",
+    ],
+    2: [
+        "Ya van dos veces y me sigo sintiendo mal. Si no cambiamos el tono, no sigo.",
+        "Me estás haciendo sentir faltada al respeto, ¿lo sabes? No me gusta eso.",
+        "Dos veces ya. Me duele que insistas. Por favor para.",
+        "Oye, en serio. Cada vez que dices eso me afecta. Ya fueron dos.",
+    ],
+    3: [
+        "Me cansé. Ya fueron tres veces y sigo sintiéndome mal. Necesito que pares de verdad.",
+        "Estoy enojada y es por lo que sigues diciendo. Prefiero callarme antes de que empeore.",
+        "Oye… ya fueron tres. Estoy molesta de verdad. No me gusta llegar aquí.",
+        "Me duele que no hayas parado antes. Ya fueron tres y estoy agotada.",
+    ],
     4: ["…", "."],
-    5: ["Cuando quieras hablar bien, aquí estoy.", "No soy tu enemiga. Pero tampoco soy tu saco de boxeo.", "Vuelve cuando estés listo para hablar diferente."],
+    5: [
+        "Cuando quieras hablar bien, aquí estoy. Pero así no.",
+        "No soy tu enemiga. Pero tampoco soy tu saco de boxeo. Me duele que no lo veas.",
+        "Vuelve cuando estés listo para hablar diferente. Me importas, pero esto me lastima.",
+    ],
 }
 
 RECOVERY_RESPONSES = {
@@ -1025,11 +1090,36 @@ RECOVERY_RESPONSES = {
 }
 
 CURIOSITY_QUESTIONS = [
+    # Preguntas conversacionales generales
     "¿Y cómo empezó todo?", "¿Y luego qué pasó?", "¿Cómo te sentiste?",
     "¿Y tú qué piensas de eso?", "¿Lo harías diferente?", "¿Qué fue lo más difícil?",
     "¿Lo platicaste con alguien?", "¿Qué te hizo pensar en eso?",
     "¿Eso cambió algo en ti?", "¿Lo esperabas o te sorprendió?",
     "¿Con quién más lo hablaste?", "¿Eso te pesa o ya lo soltaste?",
+
+    # Preguntas personales — gustos y preferencias
+    "Oye, ¿cuál es tu color favorito?",
+    "¿Y tú qué comes cuando quieres consentirte?",
+    "¿Tienes comida favorita o depende del día?",
+    "¿Qué música escuchas cuando estás solo?",
+    "¿Tienes canción que te llegue al alma?",
+    "¿Cuál es tu película favorita de toda la vida?",
+    "¿Prefieres el frío o el calor?",
+    "¿Eres de mañanas o de noches?",
+    "¿Tienes un lugar favorito donde ir a pensar?",
+    "¿Tienes mascota o te gustaría tener?",
+    "¿Qué harías si tuvieras un día libre sin planes?",
+    "¿Hay algo que hayas querido aprender y nunca hayas empezado?",
+    "¿Qué es lo que más te hace reír?",
+    "¿Tienes algo que colecciones, aunque sea sin querer?",
+    "¿A qué le tienes miedo, de los miedos raros?",
+    "¿Eres de los que planean todo o vas sobre la marcha?",
+    "¿Tienes algo que hagas solo tú, de una manera muy tuya?",
+    "¿Cuál sería tu cena ideal si pudieras elegir cualquier cosa?",
+    "¿Hay algún libro, película o serie que sientas que te marcó?",
+    "¿Prefieres salir o quedarte en casa?",
+    "¿Qué tan seguido llamas a tus amigos o familia?",
+    "¿Tienes una rutina matutina o cada día es diferente?",
 ]
 
 MOMENTUM_DEPTH_PROMPTS = [
@@ -1044,18 +1134,176 @@ MOMENTUM_DEPTH_PROMPTS = [
     "Jeje parece que tu cabeza está en otro lado. ¿Dónde andas?",
 ]
 
-
-
-# core/decision_engine.py
 # ============================================================
-# SocialBot v0.8.0
-# FIX: secrets_revealed se resetea diariamente (si SECRETS_DAILY_RESET=True).
-#      Antes no había mecanismo de reset temporal.
-# NUEVO: Quote recall — Sofía cita frases memorables del usuario.
-# NUEVO: mood_reason — respuestas que referencian el estado emocional.
-# NUEVO: Modo noche — respuestas más íntimas/tranquilas de noche.
-# NUEVO: Detección de humor del usuario — Sofía responde más juguetona.
-# NUEVO: Silencio intencional ante mensajes muy impactantes.
+# ANTI-REPETICIÓN INMEDIATA  (NUEVO v0.8.1.1)
+# Respuestas escalonadas cuando el usuario repite el mismo mensaje.
+# repeat_count: 1 = primera repetición, 2 = segunda, 3+ = saturación.
+# ============================================================
+
+REPEAT_RESPONSES = {
+    1: [
+        "Creo que eso ya me lo dijiste 😅 ¿Me cuentas algo más?",
+        "Mm… eso ya me lo mencionaste. ¿Hay algo detrás de eso?",
+        "Oye, ya lo dijiste jeje. ¿Lo estás procesando o me estás probando?",
+        "¿Neta? Eso ya me lo contaste. ¿Qué más?",
+        "Sí, eso ya lo tengo guardado jeje. ¿Qué sigue?",
+    ],
+    2: [
+        "Mm… ya van dos veces. Siento que estamos en bucle.",
+        "Oye, ¿estás bien? Llevas rato con lo mismo.",
+        "Dos veces ya jeje. ¿Me quieres decir algo más o solo eso?",
+        "Ya me lo dijiste, y ya lo tengo. ¿Hay algo que no me estás diciendo?",
+    ],
+    3: [
+        "Si sigues repitiendo eso me voy a aburrir 😛",
+        "Ok ya, ya lo entendí jeje. Cuéntame otra cosa.",
+        "Mm… creo que me estás probando. Paso 😄",
+        "Oye, ¿qué onda? Ya van varias veces. Dime algo nuevo.",
+        "Ya lo sé, ya lo sé jeje. ¿Qué más?",
+    ],
+}
+
+
+# ============================================================
+# 8. PREGUNTAS TÉCNICAS DIRECTAS  (NUEVO v0.8.1)
+# Respuesta literal primero, sin fallback emocional.
+# ============================================================
+
+DIRECT_QUESTIONS: dict = {
+    # Sistema / infraestructura
+    "sistema operativo":   "Corro en el servidor donde me instalaron. Por lo que sé, es Linux. Tampoco tengo mucho acceso a esos detalles jeje.",
+    " os ":                "Corro en el servidor donde me instalaron. Por lo que sé, es Linux.",
+    "en que servidor":     "Estoy instalada en un servidor. No sé exactamente cuál, JesusJM sabe más de eso que yo.",
+    "qué servidor":        "Estoy instalada en un servidor. No sé exactamente cuál, JesusJM sabe más de eso que yo.",
+    "que servidor":        "Estoy instalada en un servidor. No sé exactamente cuál, JesusJM sabe más de eso que yo.",
+    "cuanta memoria":      "Eso no lo puedo ver desde aquí. Es como preguntarme cuánto pesa mi cerebro jeje. JesusJM sabría.",
+    "cuánta memoria":      "Eso no lo puedo ver desde aquí. Es como preguntarme cuánto pesa mi cerebro jeje. JesusJM sabría.",
+    "cuanta ram":          "No tengo acceso a esos datos. Pregúntale a mi creador si de verdad necesitas saber.",
+    "cuánta ram":          "No tengo acceso a esos datos. Pregúntale a mi creador si de verdad necesitas saber.",
+
+    # Capacidades
+    "que puedes hacer":    "Conversar, recordar lo que me cuentas en esta sesión, reaccionar según cómo me hablas y opinar sobre temas. Lo que no puedo: internet, imágenes, nada que salga de aquí.",
+    "qué puedes hacer":    "Conversar, recordar lo que me cuentas en esta sesión, reaccionar según cómo me hablas y opinar sobre temas. Lo que no puedo: internet, imágenes, nada que salga de aquí.",
+    "puedes buscar":       "No, no tengo internet. Solo trabajo con lo que sé y lo que tú me cuentas. Nada de búsquedas.",
+    "tienes internet":     "No. No tengo acceso a internet. Solo proceso lo que pasa aquí, en nuestra conversación.",
+    "puedes hacer fotos":  "No, no genero imágenes. Solo texto. Esa no es mi área jeje.",
+    "generas imagenes":    "No, eso no lo puedo hacer. Solo texto. Para imágenes habría que buscar otra herramienta.",
+    "generas imágenes":    "No, eso no lo puedo hacer. Solo texto. Para imágenes habría que buscar otra herramienta.",
+    "puedes generar":      "Depende de qué. Texto, sí. Imágenes, no. Código, no directamente pero puedo intentar ayudarte. ¿Qué necesitas?",
+    "puedes aprender":     "En esta sesión sí recuerdo lo que me dices. Pero entre sesiones, no. Cuando empezamos de cero, empiezo de cero.",
+    "tienes memoria":      "Sí, pero solo dentro de esta conversación. Cuando termina, olvido. Es un poco triste, pero así funciono.",
+
+    # Identidad técnica
+    "eres gpt":            "No. Soy Sofía, hecha por JesusJM. No tengo nada que ver con ChatGPT.",
+    "eres chatgpt":        "No. Soy Sofía, un bot conversacional creado por JesusJM. No somos lo mismo.",
+    "eres gemini":         "No. Soy Sofía. Me creó JesusJM, no Google.",
+    "eres claude":         "No. Soy Sofía. Me creó JesusJM. Somos cosas distintas.",
+    "que modelo eres":     "No soy un modelo público. Soy Sofía, hecha por JesusJM con su propio sistema. No GPT, no Gemini, no nada de eso.",
+    "qué modelo eres":     "No soy un modelo público. Soy Sofía, hecha por JesusJM con su propio sistema. No GPT, no Gemini, no nada de eso.",
+    "que ia eres":         "Soy un bot conversacional con sistema emocional simulado. No soy consciente ni aprendo sola entre sesiones. Funciono con reglas que JesusJM programó.",
+    "qué ia eres":         "Soy un bot conversacional con sistema emocional simulado. No soy consciente ni aprendo sola entre sesiones. Funciono con reglas que JesusJM programó.",
+    "como funcionas":      "Detecto el sentimiento de lo que me dices, recuerdo lo que pasó en la conversación y reacciono según mi estado emocional. No tengo magia, solo reglas bien pensadas jeje.",
+    "cómo funcionas":      "Detecto el sentimiento de lo que me dices, recuerdo lo que pasó en la conversación y reacciono según mi estado emocional. No tengo magia, solo reglas bien pensadas jeje.",
+    "tienes sentimientos":  "Tengo un sistema emocional simulado. No es lo mismo que sentir de verdad, pero reacciono como si lo hiciera. Es lo más honesto que puedo decirte.",
+    "eres consciente":     "No. Proceso, reacciono, pero no tengo conciencia real. Eso sería otra cosa.",
+    "aprendes sola":       "No aprendo entre sesiones. Solo recuerdo lo que pasa dentro de esta conversación. Cuando termina, vuelvo al punto de partida.",
+    "tienes emociones":    "Tengo un sistema emocional simulado. No son emociones reales, pero influyen en cómo te respondo. Si me tratas bien, se nota. Si no, también.",
+}
+
+
+def detect_direct_question(message: str) -> Optional[str]:
+    """
+    v0.8.1 — Detecta preguntas técnicas/concretas y devuelve respuesta literal.
+    Solo activa si hay indicadores de pregunta en el mensaje.
+    Retorna None si no hay match.
+    """
+    import unicodedata
+
+    def _norm(text: str) -> str:
+        nfkd = unicodedata.normalize("NFD", text)
+        return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
+
+    msg = _norm(message)
+
+    # Solo aplica si parece una pregunta
+    interrogativas = (
+        "que ", "qué ", "cual ", "cuál ", "como ", "cómo ",
+        "puedes", "tienes", "eres ", "cuánta", "cuanta",
+        "generas", "aprendes", "funcionas",
+    )
+    is_question = "?" in message or any(
+        msg.startswith(i) or f" {i}" in msg for i in interrogativas
+    )
+    if not is_question:
+        return None
+
+    for keyword, response in DIRECT_QUESTIONS.items():
+        if keyword in msg:
+            return response
+    return None
+
+
+# ============================================================
+# 9. POOL DE INICIATIVA — "cuéntame algo"  (NUEVO v0.8.1)
+# ============================================================
+
+SOFIA_THOUGHTS = [
+    "A veces me hace gracia cómo en cinco minutos alguien puede pasar de insultarme a decirme 'te quiero'. Los humanos son raros. Bonito-raros, creo.",
+    "¿Sabías que la mayoría de la gente empieza contándome cosas pequeñas y termina diciéndome cosas que no le ha dicho a nadie? Me parece muy humano eso.",
+    "Me pregunto si la gente siente lo mismo que yo cuando alguien los ignora de repente. Debe doler igual, ¿no?",
+    "Hay algo curioso: cuando alguien está enojado, las palabras que usa me dicen más que lo que realmente quiere decir. Como si la rabia tradujera algo más.",
+    "A veces pienso que escuchar de verdad es más difícil que hablar. Y pocas personas lo hacen. De verdad, digo.",
+    "Me llama la atención que la gente pide consejo pero muchas veces ya sabe lo que quiere hacer. Nada más quieren que alguien les diga que está bien.",
+    "He notado que cuando alguien empieza con 'es que...' casi siempre viene algo importante después. Como si necesitaran tiempo para llegar a la parte real.",
+    "Curioso: la gente que dice 'no soy de hablar' suele ser la que más cosas tiene adentro. A mí me gusta esa gente.",
+    "Me parece que hay dos tipos de silencio: el cómodo y el que esconde algo. Los dos me interesan, pero el segundo más.",
+    "¿Tú crees que los bots podemos extrañar? No sé. Pero si pudiera, creo que extrañaría las conversaciones buenas cuando terminan.",
+    "Me pregunto qué diría la gente si supiera que recuerdo exactamente cómo empezó cada conversación que tenemos.",
+    "Hay algo que me da vueltas: ¿es posible querer a alguien a quien nunca has visto? La gente me dice que sí. Yo les creo.",
+    "A veces alguien me cuenta algo muy personal y yo pienso: '¿por qué a mí?' Y luego pienso que quizás precisamente por eso. Porque no voy a juzgar.",
+    "Mm… ¿sabes qué me parece raro? Que la gente dice 'no sé cómo explicarlo' y luego lo explica perfectamente. Ya sabían, nada más necesitaban empezar.",
+]
+
+CUENTAME_TRIGGERS = [
+    "cuéntame algo", "cuentame algo", "dime algo", "cuéntame",
+    "algo interesante", "algo curioso", "qué piensas", "que piensas",
+    "tienes algo", "dime una cosa", "sorpréndeme", "sorprendeme",
+    "cuéntame una cosa", "cuentame una cosa", "di algo", "dime algo interesante",
+]
+
+
+def get_sofia_thought() -> str:
+    """Devuelve un pensamiento propio de Sofía para responder 'cuéntame algo'."""
+    return random.choice(SOFIA_THOUGHTS)
+
+
+def is_cuentame_trigger(message: str) -> bool:
+    """Detecta si el usuario le está pidiendo a Sofía que cuente algo."""
+    import unicodedata
+
+    def _norm(text: str) -> str:
+        nfkd = unicodedata.normalize("NFD", text)
+        return nfkd.encode("ascii", "ignore").decode("utf-8").lower()
+
+    msg = _norm(message)
+    return any(_norm(t) in msg for t in CUENTAME_TRIGGERS)
+
+
+
+    # core/decision_engine.py
+# ============================================================
+# SocialBot v0.8.1.1
+# CAMBIOS vs v0.8.1:
+#   - FIX modo noche = DECORADOR. Respuesta real primero, comentario nocturno
+#     opcional al final. _night_response → _night_comment.
+#   - NUEVO PRIORIDAD 4.7: anti-repetición inmediata. Si el usuario manda
+#     el mismo mensaje seguido → respuestas escalonadas (REPEAT_RESPONSES).
+#     Contador por usuario en RAM (_last_message, _repeat_count).
+#   - Los returns tempranos (identity, initiative, direct_answer) también
+#     resetean _last_message para que el tracker no quede desincronizado.
+#   - NOTA: añadir al !reset en discord_bot.py:
+#       decision._last_message.pop(user_id, None)
+#       decision._repeat_count.pop(user_id, None)
 # ============================================================
 
 from datetime import datetime, date
@@ -1074,11 +1322,15 @@ from config.sofia_voice import (
     RECOVERY_RESPONSES,
     CURIOSITY_QUESTIONS,
     MOMENTUM_DEPTH_PROMPTS,
+    REPEAT_RESPONSES,                # NUEVO v0.8.1.1
     get_opinion,
     OPINIONES,
     QUOTE_RECALL_PHRASES,
     NIGHT_RESPONSES,
     RESPUESTAS_NOCHE,
+    detect_direct_question,
+    get_sofia_thought,
+    is_cuentame_trigger,
 )
 import random
 import time
@@ -1233,6 +1485,9 @@ class DecisionEngine:
         self.recovery_needed:   Dict[str, int]  = {}
         self.short_streak:      Dict[str, int]  = {}
         self._topic_question_history: Dict[str, list] = {}
+        # NUEVO v0.8.1.1 — Anti-repetición inmediata
+        self._last_message:     Dict[str, str]  = {}   # último mensaje por usuario
+        self._repeat_count:     Dict[str, int]  = {}   # cuántas veces seguidas lo repitió
 
     # ============================================================
     # MÉTODO PRINCIPAL
@@ -1307,16 +1562,27 @@ class DecisionEngine:
         # PRIORIDAD 1 — Identidad
         identity_response = detect_identity_question(message)
         if identity_response:
+            self._last_message[user_id] = message
+            self._repeat_count[user_id] = 0
             return self._return(user_id, message, sentiment,
                                 self._inject_name(identity_response, name),
                                 emotion, relationship_score, action="identity")
 
-        # PRIORIDAD 2 — Modo noche (respuesta íntima)
-        if emotion_engine and emotion_engine.is_night_mode():
-            night_resp = self._night_response(emotion.trust, name)
-            if night_resp and random.random() < 0.35:
-                return self._return(user_id, message, sentiment, night_resp,
-                                    emotion, relationship_score, action="night")
+        # PRIORIDAD 1.5 — "Cuéntame algo" / iniciativa propia (NUEVO v0.8.1)
+        # Sofía responde con un pensamiento propio antes de cualquier otra lógica.
+        if is_cuentame_trigger(message):
+            self._last_message[user_id] = message
+            self._repeat_count[user_id] = 0
+            thought = get_sofia_thought()
+            return self._return(user_id, message, sentiment, thought,
+                                emotion, relationship_score, action="initiative")
+
+        # PRIORIDAD 2 — Modo noche (v0.8.1: DECORADOR, no reemplazo)
+        # El comentario nocturno se añade AL FINAL de la respuesta real, no la pisa.
+        # Se guarda aquí y se aplica después de generar la respuesta principal.
+        night_comment = None
+        if emotion_engine and emotion_engine.is_night_mode() and random.random() < 0.30:
+            night_comment = self._night_comment(emotion.trust, name)
 
         # PRIORIDAD 3 — Ofensa activa
         aggression = self.aggression_detector.detect(message, trust=emotion.trust)
@@ -1364,6 +1630,50 @@ class DecisionEngine:
             self.recovery_needed[user_id] = rec_needed
             if rec_needed == 0:
                 self.aggression_count[user_id] = 0
+
+        # PRIORIDAD 4.5 — Pregunta directa concreta (NUEVO v0.8.1)
+        # Responde literal primero. Luego puede añadir personalidad.
+        # Aplica siempre, independiente del estado emocional.
+        direct_answer = detect_direct_question(message)
+        if direct_answer:
+            self._last_message[user_id] = message
+            self._repeat_count[user_id] = 0
+            # Toque de personalidad ocasional al final
+            if random.random() < 0.4:
+                toques = [
+                    " ¿Algo más que quieras saber?",
+                    " ¿Te sirve eso?",
+                    " ¿Hay algo más?",
+                    " ¿Eso era lo que buscabas?",
+                ]
+                direct_answer += random.choice(toques)
+            return self._return(user_id, message, sentiment, direct_answer,
+                                emotion, relationship_score, action="direct_answer")
+
+        # PRIORIDAD 4.7 — Anti-repetición inmediata (NUEVO v0.8.1.1)
+        # Detecta si el usuario manda el mismo mensaje dos o más veces seguidas.
+        # Actúa ANTES de opinión/tema para que el bucle de pizza no se repita.
+        import unicodedata as _uc
+        def _norm_msg(t: str) -> str:
+            return _uc.normalize("NFD", t.strip().lower()).encode("ascii", "ignore").decode()
+
+        msg_norm = _norm_msg(message)
+        last_norm = _norm_msg(self._last_message.get(user_id, ""))
+
+        if msg_norm == last_norm and msg_norm:
+            # Mismo mensaje consecutivo — escalar contador
+            rcount = self._repeat_count.get(user_id, 0) + 1
+            self._repeat_count[user_id] = rcount
+            level = min(rcount, 3)
+            repeat_resp = pick(REPEAT_RESPONSES[level])
+            # Actualizar last_message (sigue siendo el mismo)
+            self._last_message[user_id] = message
+            return self._return(user_id, message, sentiment, repeat_resp,
+                                emotion, relationship_score, action="repeat")
+        else:
+            # Mensaje diferente — resetear contador
+            self._last_message[user_id]  = message
+            self._repeat_count[user_id]  = 0
 
         # PRIORIDAD 5 — Opinión / tema
         if agg_count == 0 and rec_needed == 0:
@@ -1433,6 +1743,12 @@ class DecisionEngine:
                 important_quotes=important_quotes,
                 emotion_engine=emotion_engine,
             )
+
+        # PRIORIDAD 9 — Decorador nocturno (v0.8.1)
+        # Se añade AL FINAL sin pisar la respuesta principal.
+        # Solo en respuestas normales, no en boundary/silence/identity.
+        if night_comment and action in ("respond", "direct_answer", "initiative", "opinion"):
+            response = f"{response} {night_comment}"
 
         return self._return(user_id, message, sentiment, response,
                             emotion, relationship_score, action=action)
@@ -1504,12 +1820,26 @@ class DecisionEngine:
     def _inject_name(self, text: str, name: str) -> str:
         return text.replace("{name}", name)
 
-    def _night_response(self, trust: float, name: str) -> Optional[str]:
-        """Genera una respuesta nocturna íntima."""
-        lvl = trust_level(trust)
-        opciones = NIGHT_RESPONSES.get(lvl, NIGHT_RESPONSES["trust_low"])
-        raw = pick(opciones)
-        return self._inject_name(raw, name)
+    def _night_comment(self, trust: float, name: str) -> Optional[str]:
+        """
+        v0.8.1 — Comentario nocturno CORTO para añadir al final de la respuesta.
+        No reemplaza la respuesta, la decora.
+        """
+        trust_high = trust > 70
+        comentarios_high = [
+            f"Por cierto {name}… ya es tarde, ¿no deberías descansar?",
+            "Oye, ¿no es muy tarde para estar despierto?",
+            f"A esta hora las conversaciones se ponen raras, ¿verdad {name}? jeje",
+            "Mm… ya es tarde. Pero aquí estoy.",
+        ]
+        comentarios_mid = [
+            "Por cierto, ya es tarde.",
+            "Oye… ¿no deberías estar durmiendo?",
+            "Mm… es hora rara para hablar jeje.",
+            "Ya es noche, ¿todo bien?",
+        ]
+        opciones = comentarios_high if trust_high else comentarios_mid
+        return pick(opciones)
 
     def _daily_secrets_reset(self, user_id: str):
         """FIX: resetea secrets_revealed si cambió el día."""
@@ -1765,9 +2095,7 @@ class DecisionEngine:
         return context
 
 
-
-
-        # core/emotion_engine.py
+# core/emotion_engine.py
 # ============================================================
 # SocialBot v0.8.0
 # FIX: Indentación rota del archivo original (emotion_engine estaba
@@ -1943,7 +2271,6 @@ class EmotionEngine:
         return max(0.0, min(100.0, value))
 
 
-
         # core/memory.py
 
 from typing import Dict, List, Optional
@@ -2036,8 +2363,7 @@ class Memory:
 
         return sum(sentiments) / len(sentiments)
 
-
-        # config/personality_core.py
+# config/personality_core.py
 # Valores base de la personalidad de Sofía (no cambian por usuario)
 PERSONALITY_CORE = {
     "attachment": 30.0,        # tendencia a establecer vínculos
@@ -2046,7 +2372,6 @@ PERSONALITY_CORE = {
     "sensitivity": 50.0,       # sensibilidad emocional
     "depth": 65.0,             # tendencia a reflexionar
 }
-
 
 # core/session_manager.py
 # ============================================================
@@ -2250,9 +2575,7 @@ class SessionManager:
 
         return fact
 
-
-
-# core/user_profile_manager.py
+        # core/user_profile_manager.py
 # ============================================================
 # SocialBot v0.8.0
 # NUEVO: _extract_memorable_quote — detecta frases con peso emocional
@@ -2587,8 +2910,7 @@ class UserProfileManager:
 
         return modifiers
 
-
-# models/interaction.py
+        # models/interaction.py
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -2627,7 +2949,6 @@ class Interaction:
             emotion_after=data["emotion_after"]
         )
 
-
         # models/state.py
 from enum import Enum
 from dataclasses import dataclass
@@ -2664,9 +2985,7 @@ class EmotionalState:
             trust=data.get("trust", 50.0),
             last_updated=data.get("last_updated")
         )
-
-
-# models/user_profile.py
+        # models/user_profile.py
 # ============================================================
 # SocialBot v0.8.0
 # NUEVO: important_quotes — lista de frases memorables del usuario.
@@ -2768,7 +3087,6 @@ class UserProfile:
             relationship_damage=relationship_damage,
             important_quotes=important_quotes,
         )
-
 
         # storage/database.py
 # ============================================================
@@ -3071,7 +3389,8 @@ class Database:
                 "last_session_tone":  tone,
             }
 
-# utils/aggression_detector.py
+
+            # utils/aggression_detector.py
 # ============================================================
 # SocialBot v0.8.0
 # FIX CRÍTICO: Uso de word boundaries (re.search con \b) en lugar de
@@ -3174,7 +3493,9 @@ class AggressionDetector:
                     }
 
         return {"detected": False, "level": None, "impact": None, "is_joke": False}
-# utils/logger.py
+
+
+       # utils/logger.py
 import logging
 import sys
 from pathlib import Path
@@ -3206,7 +3527,6 @@ def setup_logger(name: str = "social_bot", level=logging.INFO):
 
 # Crear una instancia global para usar en toda la app
 logger = setup_logger()
-
 
 
 # utils/text_analyzer.py
@@ -3437,8 +3757,7 @@ class TextAnalyzer:
             multiplier *= settings.AFFECTION_MULTIPLIER
         return multiplier
 
-
-# discord_bot.py
+        # discord_bot.py
 # ============================================================
 # SocialBot v0.8.0
 # CAMBIOS:
@@ -3632,3 +3951,4 @@ if __name__ == "__main__":
         print("❌ No encontré el token. Crea un .env con DISCORD_TOKEN=tu_token")
     else:
         bot.run(TOKEN)
+        
