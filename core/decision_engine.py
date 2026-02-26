@@ -459,9 +459,8 @@ class DecisionEngine:
             trust_lvl = trust_level(emotion.trust)
             opciones  = _CONFESSION_RESPONSES.get(trust_lvl, _CONFESSION_RESPONSES["trust_mid"])
             conf_resp = self._inject_name(random.choice(opciones), name)
-            # FIX BUG 4: aplicar decorador nocturno si corresponde
-            if night_comment:
-                conf_resp = f"{conf_resp} {night_comment}"
+            # NO se añade night_comment: una confesión emocional no debe
+            # interrumpirse con "ya es noche jeje" — rompe el momento.
             self._last_message[user_id] = message
             self._repeat_count[user_id] = 0
             return self._return(user_id, message, sentiment, conf_resp,
@@ -512,9 +511,14 @@ class DecisionEngine:
 
         facts_to_use = important_facts if rec_needed == 0 else {}
 
+        # FIX: "emotion floor" — si no hay conflicto activo y el mensaje es neutro/positivo,
+        # no dejar que un estado dañado (energy ~5) genere respuestas de tristeza para frases
+        # como "ok" o "bien". Se usa solo para selección de template, no modifica el estado real.
+        eff_emotion = self._effective_emotion_for_response(emotion, agg_count, rec_needed, sentiment)
+
         response = self._generate_response(
             action=action,
-            emotion=emotion,
+            emotion=eff_emotion,
             special_content=special_content,
             important_facts=facts_to_use,
             context=context,
@@ -622,7 +626,9 @@ class DecisionEngine:
             self._mark_cooldown(user_id, "quote", msg_n)
             return f"{response} {frase}"
 
-        if active_topic:
+        # FIX: si el mensaje tiene carga emocional alta (positiva o negativa),
+        # ignorar el topic lock — Sofía debe responder al momento, no al tema previo.
+        if active_topic and sentiment is not None and abs(sentiment) <= 0.4:
             history = self._topic_question_history.get(user_id, [])
             tq = self.topic_lock.get_topic_question(active_topic, history)
             if tq:
@@ -662,6 +668,31 @@ class DecisionEngine:
     # ============================================================
     # HELPERS
     # ============================================================
+
+    def _effective_emotion_for_response(self, emotion, agg_count, rec_needed, sentiment):
+        """
+        FIX: Devuelve un EmotionalState ajustado solo para selección de template.
+        Si no hay conflicto activo y el mensaje es neutro/positivo, pone un floor
+        en energy (35) para evitar que un estado dañado genere respuestas de tristeza
+        ante frases como "ok", "bien", "soy programador".
+        NO modifica el estado real del perfil.
+        """
+        if agg_count > 0 or rec_needed > 0:
+            return emotion  # durante conflicto/recovery: usar estado real
+        if sentiment is not None and sentiment >= -0.1 and emotion.energy < 35:
+            from copy import copy
+            from models.state import Emotion
+            eff = copy(emotion)
+            eff.energy = 35.0  # floor
+            # Recalcular emoción primaria con el energy corregido
+            if eff.energy > 65 and eff.trust > 60:
+                eff.primary_emotion = Emotion.HAPPY
+            elif eff.trust < 25:
+                eff.primary_emotion = Emotion.ANGRY
+            else:
+                eff.primary_emotion = Emotion.NEUTRAL
+            return eff
+        return emotion
 
     def _inject_name(self, text: str, name: str) -> str:
         return text.replace("{name}", name)
@@ -828,7 +859,11 @@ class DecisionEngine:
             extra = self._pick_extra_safe(traits, empathy_bonus)
             if extra:
                 parts.append(extra)
-        return " ".join(p for p in parts if p)
+        result = " ".join(p for p in parts if p)
+        result = _re.sub(r'^(Mm…\s*){2,}', 'Mm… ', result)
+        result = _re.sub(r'^(Ay…\s*){2,}', 'Ay… ', result)
+        result = _re.sub(r'^(Oye…\s*){2,}', 'Oye… ', result)
+        return result
 
     def _pick_extra_safe(self, traits, empathy_bonus):
         extras = []

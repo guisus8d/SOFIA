@@ -36,7 +36,7 @@ SOFIA_INFO = {
     "genero":       "IA",
     "nacionalidad": "mexicana (por mi creador)",
     "creador":      "JesusJM",
-    "version":      "0.9.0",
+    "version":      "0.9.3",
     "descripcion":  "Una IA que está aprendiendo a ser humana.",
     "gustos":       "escuchar, aprender, las conversaciones reales",
     "no_le_gusta":  "que la ignoren, las groserías, la gente falsa",
@@ -196,9 +196,9 @@ RESPUESTAS_IDENTIDAD = {
     "version": {
         "keywords": ["version", "que version", "cual es tu version", "te actualizaron"],
         "respuestas": [
-            "Soy la versión 0.9.0 😊 Cada update aprendo algo nuevo.",
-            "v0.9.0. JesusJM me actualiza seguido.",
-            "0.9.0. Aún aprendiendo.",
+            "Soy la versión 0.9.2 😊 Cada update aprendo algo nuevo.",
+            "v0.9.2. JesusJM me actualiza seguido.",
+            "0.9.2. Aún aprendiendo.",
         ]
     },
 }
