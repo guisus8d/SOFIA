@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sofía — Panel de Administración</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:        #030711;
+      --bg2:       #060d1a;
+      --blue:      #0ea5e9;
+      --blue-dim:  #0369a1;
+      --blue-glow: #38bdf8;
+      --cyan:      #06b6d4;
+      --white:     #e2f0ff;
+      --muted:     #4a6080;
+      --border:    #0f2035;
+      --green:     #22c55e;
+      --red:       #ef4444;
+      --yellow:    #eab308;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--white);
+      font-family: 'Space Mono', monospace;
+      overflow-x: hidden;
+      cursor: none;
+      min-height: 100vh;
+    }
+
+    /* ── Cursor ── */
+    .cursor {
+      position: fixed; width: 10px; height: 10px;
+      background: var(--blue-glow); border-radius: 50%;
+      pointer-events: none; z-index: 9999;
+      transform: translate(-50%, -50%);
+      transition: transform 0.08s ease;
+      box-shadow: 0 0 12px var(--blue-glow), 0 0 30px var(--blue);
+    }
+    .cursor-ring {
+      position: fixed; width: 36px; height: 36px;
+      border: 1px solid rgba(14,165,233,0.4); border-radius: 50%;
+      pointer-events: none; z-index: 9998;
+      transform: translate(-50%, -50%);
+      transition: transform 0.18s ease, width 0.2s, height 0.2s;
+    }
+
+    /* ── Grid fondo ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(14,165,233,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(14,165,233,0.04) 1px, transparent 1px);
+      background-size: 60px 60px;
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ── Ambiente ── */
+    .ambient { position: fixed; border-radius: 50%; filter: blur(120px); pointer-events: none; z-index: 0; opacity: 0.12; }
+    .ambient-1 { width: 500px; height: 500px; background: var(--blue); top: -150px; left: -100px; animation: drift1 12s ease-in-out infinite alternate; }
+    .ambient-2 { width: 350px; height: 350px; background: var(--cyan); bottom: -80px; right: -80px; animation: drift2 15s ease-in-out infinite alternate; }
+    @keyframes drift1 { to { transform: translate(60px, 80px); } }
+    @keyframes drift2 { to { transform: translate(-40px, -60px); } }
+
+    /* ── Scanline ── */
+    .scan-line {
+      position: fixed; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--blue-glow), transparent);
+      opacity: 0.3; animation: scan 8s linear infinite;
+      pointer-events: none; z-index: 100;
+    }
+    @keyframes scan {
+      0%   { top: 0; opacity: 0; }
+      5%   { opacity: 0.3; }
+      95%  { opacity: 0.3; }
+      100% { top: 100vh; opacity: 0; }
+    }
+
+    /* ============================================================
+       LOGIN SCREEN
+    ============================================================ */
+    #login-screen {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 500; background: var(--bg);
+      transition: opacity 0.4s ease;
+    }
+    #login-screen.hidden { opacity: 0; pointer-events: none; }
+
+    .login-box {
+      width: 100%; max-width: 420px;
+      border: 1px solid var(--border);
+      background: rgba(6,13,26,0.9);
+      padding: 2.5rem;
+      position: relative;
+      z-index: 1;
+    }
+    .login-box::before {
+      content: '';
+      position: absolute; top: -1px; left: 2rem; right: 2rem; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--blue-glow), transparent);
+    }
+
+    .login-label {
+      font-size: 0.6rem; letter-spacing: 0.3em;
+      color: var(--blue); text-transform: uppercase;
+      margin-bottom: 0.5rem;
+    }
+    .login-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800; font-size: 1.8rem;
+      color: var(--white); margin-bottom: 0.3rem;
+    }
+    .login-title span { color: var(--blue-glow); text-shadow: 0 0 20px var(--blue); }
+    .login-sub {
+      font-size: 0.65rem; color: var(--muted);
+      letter-spacing: 0.1em; margin-bottom: 2rem;
+    }
+
+    .login-field { margin-bottom: 1rem; }
+    .login-field label {
+      display: block; font-size: 0.6rem;
+      letter-spacing: 0.2em; color: var(--muted);
+      text-transform: uppercase; margin-bottom: 0.5rem;
+    }
+    .login-field input {
+      width: 100%; background: rgba(14,165,233,0.04);
+      border: 1px solid var(--border); color: var(--white);
+      font-family: 'Space Mono', monospace; font-size: 0.85rem;
+      padding: 0.75rem 1rem; outline: none;
+      transition: border-color 0.2s;
+    }
+    .login-field input:focus { border-color: var(--blue); }
+    .login-field input::placeholder { color: var(--muted); }
+
+    .login-btn {
+      width: 100%; background: transparent;
+      border: 1px solid var(--blue); color: var(--blue-glow);
+      font-family: 'Space Mono', monospace; font-size: 0.8rem;
+      letter-spacing: 0.2em; text-transform: uppercase;
+      padding: 0.85rem; cursor: none;
+      transition: background 0.2s, box-shadow 0.2s;
+      margin-top: 0.5rem;
+    }
+    .login-btn:hover {
+      background: rgba(14,165,233,0.08);
+      box-shadow: 0 0 20px rgba(14,165,233,0.2);
+    }
+
+    .login-error {
+      font-size: 0.65rem; color: var(--red);
+      letter-spacing: 0.1em; margin-top: 0.75rem;
+      min-height: 1rem; text-align: center;
+    }
+
+    /* ============================================================
+       MAIN LAYOUT
+    ============================================================ */
+    #app { display: none; min-height: 100vh; position: relative; z-index: 1; }
+    #app.visible { display: flex; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 220px; min-width: 220px;
+      border-right: 1px solid var(--border);
+      padding: 2rem 0;
+      display: flex; flex-direction: column;
+      position: sticky; top: 0; height: 100vh;
+      background: rgba(3,7,17,0.95);
+    }
+
+    .sidebar-logo {
+      font-family: 'Syne', sans-serif; font-weight: 800;
+      font-size: 1.2rem; color: var(--blue-glow);
+      text-shadow: 0 0 20px var(--blue);
+      padding: 0 1.5rem 0.3rem;
+    }
+    .sidebar-ver {
+      font-size: 0.55rem; color: var(--muted);
+      letter-spacing: 0.2em; padding: 0 1.5rem;
+      text-transform: uppercase; margin-bottom: 2rem;
+    }
+
+    .sidebar-section {
+      font-size: 0.55rem; letter-spacing: 0.25em;
+      color: var(--muted); text-transform: uppercase;
+      padding: 0 1.5rem; margin-bottom: 0.5rem; margin-top: 1rem;
+    }
+
+    .nav-item {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.65rem 1.5rem; font-size: 0.72rem;
+      color: var(--muted); letter-spacing: 0.05em;
+      cursor: none; transition: color 0.15s, background 0.15s;
+      border-left: 2px solid transparent;
+      text-decoration: none;
+    }
+    .nav-item:hover { color: var(--white); background: rgba(14,165,233,0.04); }
+    .nav-item.active {
+      color: var(--blue-glow); border-left-color: var(--blue);
+      background: rgba(14,165,233,0.06);
+    }
+    .nav-icon { font-size: 0.9rem; }
+
+    .sidebar-bottom {
+      margin-top: auto; padding: 1rem 1.5rem;
+      border-top: 1px solid var(--border);
+    }
+    .sidebar-status {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.62rem; color: var(--muted);
+    }
+    .status-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green); box-shadow: 0 0 6px var(--green);
+      animation: pulse-dot 2s infinite;
+    }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .logout-btn {
+      margin-top: 0.75rem; width: 100%; background: transparent;
+      border: 1px solid var(--border); color: var(--muted);
+      font-family: 'Space Mono', monospace; font-size: 0.6rem;
+      letter-spacing: 0.15em; text-transform: uppercase;
+      padding: 0.5rem; cursor: none;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .logout-btn:hover { border-color: var(--red); color: var(--red); }
+
+    /* ── Main Content ── */
+    .main { flex: 1; overflow-y: auto; }
+
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1.5rem 2rem; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: rgba(3,7,17,0.95);
+      backdrop-filter: blur(10px); z-index: 10;
+    }
+    .topbar-title {
+      font-family: 'Syne', sans-serif; font-weight: 800;
+      font-size: 1.1rem; color: var(--white);
+    }
+    .topbar-meta { font-size: 0.62rem; color: var(--muted); letter-spacing: 0.1em; }
+
+    .refresh-btn {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--muted); font-family: 'Space Mono', monospace;
+      font-size: 0.6rem; letter-spacing: 0.15em; text-transform: uppercase;
+      padding: 0.4rem 0.9rem; cursor: none;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .refresh-btn:hover { border-color: var(--blue); color: var(--blue-glow); }
+
+    .content { padding: 2rem; }
+
+    /* ── Páginas ── */
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* ── Stats cards ── */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 1rem; margin-bottom: 2rem;
+    }
+    .stat-card {
+      border: 1px solid var(--border);
+      background: rgba(6,13,26,0.6);
+      padding: 1.25rem 1.5rem;
+      position: relative; overflow: hidden;
+    }
+    .stat-card::after {
+      content: ''; position: absolute;
+      top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--blue-dim), transparent);
+    }
+    .stat-label {
+      font-size: 0.58rem; letter-spacing: 0.2em;
+      color: var(--muted); text-transform: uppercase; margin-bottom: 0.5rem;
+    }
+    .stat-value {
+      font-family: 'Syne', sans-serif; font-weight: 800;
+      font-size: 2rem; color: var(--white);
+      text-shadow: 0 0 20px rgba(14,165,233,0.3);
+    }
+    .stat-value.blue  { color: var(--blue-glow); text-shadow: 0 0 20px var(--blue); }
+    .stat-value.green { color: var(--green); text-shadow: 0 0 15px var(--green); }
+    .stat-value.cyan  { color: var(--cyan); }
+    .stat-sub { font-size: 0.6rem; color: var(--muted); margin-top: 0.3rem; }
+
+    /* ── Section header ── */
+    .section-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .section-title {
+      font-size: 0.65rem; letter-spacing: 0.25em;
+      color: var(--blue); text-transform: uppercase;
+      display: flex; align-items: center; gap: 0.7rem;
+    }
+    .section-title::before {
+      content: ''; display: block; width: 20px; height: 1px;
+      background: var(--blue); box-shadow: 0 0 4px var(--blue);
+    }
+    .section-count {
+      font-size: 0.6rem; color: var(--muted); letter-spacing: 0.1em;
+    }
+
+    /* ── Table ── */
+    .table-wrap {
+      border: 1px solid var(--border);
+      background: rgba(6,13,26,0.4);
+      overflow-x: auto; margin-bottom: 2rem;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background: rgba(14,165,233,0.04); border-bottom: 1px solid var(--border); }
+    th {
+      text-align: left; padding: 0.75rem 1rem;
+      font-size: 0.58rem; letter-spacing: 0.2em;
+      color: var(--muted); text-transform: uppercase;
+      font-weight: 400;
+    }
+    td {
+      padding: 0.75rem 1rem; font-size: 0.72rem;
+      color: var(--white); border-bottom: 1px solid rgba(15,32,53,0.6);
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(14,165,233,0.03); }
+
+    .emotion-badge {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      padding: 0.2rem 0.5rem; font-size: 0.6rem;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      border: 1px solid;
+    }
+    .emotion-happy   { color: var(--green); border-color: rgba(34,197,94,0.3); background: rgba(34,197,94,0.05); }
+    .emotion-neutral { color: var(--muted); border-color: rgba(74,96,128,0.3); background: rgba(74,96,128,0.05); }
+    .emotion-sad     { color: #93c5fd; border-color: rgba(147,197,253,0.3); background: rgba(147,197,253,0.05); }
+    .emotion-angry   { color: var(--red); border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.05); }
+    .emotion-fearful { color: #c4b5fd; border-color: rgba(196,181,253,0.3); background: rgba(196,181,253,0.05); }
+
+    .mini-bar-wrap { display: flex; align-items: center; gap: 0.5rem; }
+    .mini-bar {
+      height: 4px; background: var(--border); flex: 1;
+      max-width: 80px; overflow: hidden;
+    }
+    .mini-bar-fill { height: 100%; background: var(--blue); transition: width 0.5s; }
+    .mini-bar-fill.green { background: var(--green); }
+    .mini-bar-fill.red   { background: var(--red); }
+    .mini-val { font-size: 0.62rem; color: var(--muted); min-width: 28px; }
+
+    .action-btn {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--muted); font-family: 'Space Mono', monospace;
+      font-size: 0.58rem; letter-spacing: 0.1em; padding: 0.3rem 0.6rem;
+      cursor: none; transition: all 0.15s;
+    }
+    .action-btn:hover { border-color: var(--blue); color: var(--blue-glow); }
+    .action-btn.danger:hover { border-color: var(--red); color: var(--red); }
+
+    /* ── Terminal log ── */
+    .terminal {
+      border: 1px solid var(--border);
+      background: rgba(6,13,26,0.7);
+      margin-bottom: 2rem;
+    }
+    .terminal-bar {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.7rem 1rem; background: rgba(14,165,233,0.04);
+      border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .dot-r { background: #ef4444; opacity: 0.7; }
+    .dot-y { background: #eab308; opacity: 0.7; }
+    .dot-g { background: #22c55e; opacity: 0.7; }
+    .terminal-title { margin-left: auto; font-size: 0.58rem; letter-spacing: 0.2em; color: var(--muted); }
+    .terminal-body {
+      padding: 1rem 1.25rem; font-size: 0.72rem;
+      line-height: 1.9; max-height: 280px; overflow-y: auto;
+    }
+    .log-line { display: flex; gap: 1rem; }
+    .log-time { color: var(--muted); font-size: 0.62rem; min-width: 70px; }
+    .log-user { color: var(--cyan); }
+    .log-msg  { color: #94a3b8; }
+    .log-sys  { color: var(--green); font-size: 0.65rem; }
+
+    /* ── Perfil modal ── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(3,7,17,0.85);
+      z-index: 200; align-items: center; justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      width: 100%; max-width: 600px;
+      border: 1px solid var(--border);
+      background: var(--bg2); padding: 2rem;
+      position: relative;
+    }
+    .modal::before {
+      content: ''; position: absolute; top: -1px;
+      left: 2rem; right: 2rem; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--blue-glow), transparent);
+    }
+    .modal-close {
+      position: absolute; top: 1rem; right: 1rem;
+      background: transparent; border: 1px solid var(--border);
+      color: var(--muted); font-family: 'Space Mono', monospace;
+      font-size: 0.7rem; padding: 0.25rem 0.6rem; cursor: none;
+    }
+    .modal-close:hover { border-color: var(--red); color: var(--red); }
+    .modal-title {
+      font-family: 'Syne', sans-serif; font-weight: 800;
+      font-size: 1.1rem; margin-bottom: 1.5rem; color: var(--white);
+    }
+    .modal-title span { color: var(--blue-glow); }
+    .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .modal-field label {
+      font-size: 0.58rem; letter-spacing: 0.18em;
+      color: var(--muted); text-transform: uppercase;
+      display: block; margin-bottom: 0.3rem;
+    }
+    .modal-field .val {
+      font-size: 0.8rem; color: var(--white);
+    }
+    .modal-field .val.highlight {
+      color: var(--blue-glow);
+    }
+    .modal-topics {
+      display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.3rem;
+    }
+    .topic-tag {
+      padding: 0.15rem 0.5rem; font-size: 0.58rem;
+      border: 1px solid var(--border); color: var(--muted);
+      letter-spacing: 0.1em;
+    }
+
+    /* ── Empty state ── */
+    .empty {
+      padding: 3rem; text-align: center;
+      color: var(--muted); font-size: 0.75rem;
+      letter-spacing: 0.1em;
+    }
+
+    /* ── Loading ── */
+    .loading {
+      display: inline-block; width: 8px; height: 8px;
+      border: 1px solid var(--muted); border-top-color: var(--blue);
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+      margin-right: 0.5rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Config page ── */
+    .config-card {
+      border: 1px solid var(--border);
+      background: rgba(6,13,26,0.4);
+      padding: 1.5rem; margin-bottom: 1rem;
+    }
+    .config-card-title {
+      font-size: 0.65rem; letter-spacing: 0.2em;
+      color: var(--blue); text-transform: uppercase;
+      margin-bottom: 1rem;
+    }
+    .config-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.6rem 0; border-bottom: 1px solid rgba(15,32,53,0.6);
+      font-size: 0.72rem;
+    }
+    .config-row:last-child { border-bottom: none; }
+    .config-key { color: var(--muted); font-size: 0.65rem; letter-spacing: 0.05em; }
+    .config-val { color: var(--white); font-size: 0.72rem; }
+    .config-val.green { color: var(--green); }
+    .config-val.red   { color: var(--red); }
+
+    @media (max-width: 900px) {
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+      .sidebar { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="cursor" id="cursor"></div>
+  <div class="cursor-ring" id="cursorRing"></div>
+  <div class="ambient ambient-1"></div>
+  <div class="ambient ambient-2"></div>
+  <div class="scan-line"></div>
+
+  <!-- ============================================================
+       LOGIN
+  ============================================================ -->
+  <div id="login-screen">
+    <div class="login-box">
+      <div class="login-label">Sistema seguro</div>
+      <div class="login-title"><span>Sofía</span> Admin</div>
+      <div class="login-sub">Acceso restringido — credenciales requeridas</div>
+
+      <div class="login-field">
+        <label>Usuario</label>
+        <input type="text" id="login-user" placeholder="admin" autocomplete="off" />
+      </div>
+      <div class="login-field">
+        <label>Contraseña</label>
+        <input type="password" id="login-pass" placeholder="••••••••" />
+      </div>
+
+      <button class="login-btn" onclick="doLogin()">→ Iniciar sesión</button>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       APP
+  ============================================================ -->
+  <div id="app">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">SOFÍA</div>
+      <div class="sidebar-ver">Panel de administración</div>
+
+      <div class="sidebar-section">Principal</div>
+      <a class="nav-item active" onclick="showPage('dashboard')" href="#">
+        <span class="nav-icon">◈</span> Dashboard
+      </a>
+      <a class="nav-item" onclick="showPage('usuarios')" href="#">
+        <span class="nav-icon">◉</span> Usuarios
+      </a>
+      <a class="nav-item" onclick="showPage('interacciones')" href="#">
+        <span class="nav-icon">◎</span> Interacciones
+      </a>
+
+      <div class="sidebar-section">Sistema</div>
+      <a class="nav-item" onclick="showPage('config')" href="#">
+        <span class="nav-icon">◌</span> Configuración
+      </a>
+
+      <div class="sidebar-bottom">
+        <div class="sidebar-status">
+          <span class="status-dot"></span>
+          <span id="sidebar-status-text">Conectando...</span>
+        </div>
+        <button class="logout-btn" onclick="doLogout()">→ Cerrar sesión</button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title" id="page-title">Dashboard</div>
+          <div class="topbar-meta" id="page-meta">Cargando datos...</div>
+        </div>
+        <button class="refresh-btn" onclick="refreshCurrentPage()">↺ Actualizar</button>
+      </div>
+
+      <div class="content">
+
+        <!-- ── DASHBOARD ── -->
+        <div class="page active" id="page-dashboard">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Usuarios totales</div>
+              <div class="stat-value blue" id="stat-users">—</div>
+              <div class="stat-sub">perfiles en DB</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Interacciones</div>
+              <div class="stat-value" id="stat-interactions">—</div>
+              <div class="stat-sub">mensajes procesados</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Sentimiento avg</div>
+              <div class="stat-value cyan" id="stat-sentiment">—</div>
+              <div class="stat-sub">promedio global</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Estado bot</div>
+              <div class="stat-value green" id="stat-status">ONLINE</div>
+              <div class="stat-sub">sin interrupciones</div>
+            </div>
+          </div>
+
+          <!-- Últimas interacciones -->
+          <div class="section-header">
+            <div class="section-title">Actividad reciente</div>
+            <div class="section-count" id="recent-count">—</div>
+          </div>
+          <div class="terminal">
+            <div class="terminal-bar">
+              <span class="dot dot-r"></span>
+              <span class="dot dot-y"></span>
+              <span class="dot dot-g"></span>
+              <span class="terminal-title">SOFIA_ADMIN / recent_activity</span>
+            </div>
+            <div class="terminal-body" id="recent-log">
+              <div class="log-sys">// cargando actividad...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── USUARIOS ── -->
+        <div class="page" id="page-usuarios">
+          <div class="section-header">
+            <div class="section-title">Perfiles de usuario</div>
+            <div class="section-count" id="users-count">—</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>User ID</th>
+                  <th>Emoción</th>
+                  <th>Energía</th>
+                  <th>Confianza</th>
+                  <th>Daño rel.</th>
+                  <th>Interacciones</th>
+                  <th>Último contacto</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="users-tbody">
+                <tr><td colspan="8" class="empty">Cargando...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ── INTERACCIONES ── -->
+        <div class="page" id="page-interacciones">
+          <div class="section-header">
+            <div class="section-title">Historial de interacciones</div>
+            <div class="section-count" id="inter-count">—</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>User ID</th>
+                  <th>Mensaje</th>
+                  <th>Sentimiento</th>
+                  <th>Emoción antes</th>
+                  <th>Emoción después</th>
+                </tr>
+              </thead>
+              <tbody id="inter-tbody">
+                <tr><td colspan="6" class="empty">Cargando...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ── CONFIG ── -->
+        <div class="page" id="page-config">
+          <div class="config-card">
+            <div class="config-card-title">Estado del sistema</div>
+            <div class="config-row">
+              <span class="config-key">Versión</span>
+              <span class="config-val" id="cfg-version">—</span>
+            </div>
+            <div class="config-row">
+              <span class="config-key">Base de datos</span>
+              <span class="config-val green" id="cfg-db">Conectada ✓</span>
+            </div>
+            <div class="config-row">
+              <span class="config-key">Token Discord</span>
+              <span class="config-val green">Configurado ✓</span>
+            </div>
+            <div class="config-row">
+              <span class="config-key">API URL</span>
+              <span class="config-val" id="cfg-api-url">—</span>
+            </div>
+          </div>
+
+          <div class="config-card">
+            <div class="config-card-title">Acciones peligrosas</div>
+            <div class="config-row">
+              <span class="config-key">Limpiar todos los contadores de sesión</span>
+              <button class="action-btn danger" onclick="confirmAction('reset_sessions')">Ejecutar</button>
+            </div>
+            <div class="config-row">
+              <span class="config-key">Eliminar interacciones antiguas (&gt; 30 días)</span>
+              <button class="action-btn danger" onclick="confirmAction('purge_old')">Ejecutar</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /content -->
+    </main>
+  </div>
+
+  <!-- Modal de perfil -->
+  <div class="modal-overlay" id="profile-modal">
+    <div class="modal">
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <div class="modal-title">Perfil: <span id="modal-userid">—</span></div>
+      <div class="modal-grid" id="modal-content"></div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================================
+    // CONFIG — cambia esto a tu URL de Railway cuando esté arriba
+    // ============================================================
+    const API_BASE = window.location.origin;  // mismo origen que FastAPI
+    const ADMIN_USER = 'admin';
+    // La contraseña real se valida en el backend — aquí solo hacemos
+    // el request. Si quieres validación offline temporal, cámbiala abajo.
+    const OFFLINE_PASS = 'sofia2025'; // solo para desarrollo sin backend
+
+    // ============================================================
+    // ESTADO
+    // ============================================================
+    let authToken = null;
+    let currentPage = 'dashboard';
+    let usersData = [];
+
+    // ============================================================
+    // CURSOR
+    // ============================================================
+    const cursorEl   = document.getElementById('cursor');
+    const cursorRing = document.getElementById('cursorRing');
+    let mx = 0, my = 0, rx = 0, ry = 0;
+
+    document.addEventListener('mousemove', e => {
+      mx = e.clientX; my = e.clientY;
+      cursorEl.style.left = mx + 'px';
+      cursorEl.style.top  = my + 'px';
+    });
+    (function animRing() {
+      rx += (mx - rx) * 0.12;
+      ry += (my - ry) * 0.12;
+      cursorRing.style.left = rx + 'px';
+      cursorRing.style.top  = ry + 'px';
+      requestAnimationFrame(animRing);
+    })();
+    document.addEventListener('mouseover', e => {
+      if (e.target.matches('a,button,input,tr')) {
+        cursorRing.style.width  = '54px';
+        cursorRing.style.height = '54px';
+        cursorRing.style.borderColor = 'rgba(14,165,233,0.7)';
+      } else {
+        cursorRing.style.width  = '36px';
+        cursorRing.style.height = '36px';
+        cursorRing.style.borderColor = 'rgba(14,165,233,0.4)';
+      }
+    });
+
+    // ============================================================
+    // LOGIN
+    // ============================================================
+    document.getElementById('login-pass').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
+    });
+
+    async function doLogin() {
+      const user = document.getElementById('login-user').value.trim();
+      const pass = document.getElementById('login-pass').value;
+      const errEl = document.getElementById('login-error');
+      errEl.textContent = '';
+
+      if (!user || !pass) {
+        errEl.textContent = '// campos requeridos';
+        return;
+      }
+
+      // Intentar login contra el backend
+      try {
+        const res = await fetch(`${API_BASE}/api/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          authToken = data.token;
+          enterApp();
+          return;
+        }
+      } catch (_) {
+        // Backend no disponible — modo desarrollo offline
+        if (user === ADMIN_USER && pass === OFFLINE_PASS) {
+          authToken = 'offline';
+          enterApp();
+          return;
+        }
+      }
+
+      errEl.textContent = '// credenciales incorrectas';
+    }
+
+    function enterApp() {
+      document.getElementById('login-screen').classList.add('hidden');
+      const app = document.getElementById('app');
+      app.style.display = 'flex';
+      setTimeout(() => app.classList.add('visible'), 50);
+      loadDashboard();
+    }
+
+    function doLogout() {
+      authToken = null;
+      document.getElementById('app').style.display = 'none';
+      document.getElementById('app').classList.remove('visible');
+      document.getElementById('login-screen').classList.remove('hidden');
+      document.getElementById('login-pass').value = '';
+    }
+
+    // ============================================================
+    // NAVEGACIÓN
+    // ============================================================
+    const pageTitles = {
+      dashboard:      'Dashboard',
+      usuarios:       'Usuarios',
+      interacciones:  'Interacciones',
+      config:         'Configuración',
+    };
+
+    function showPage(name) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.getElementById(`page-${name}`).classList.add('active');
+      document.querySelectorAll('.nav-item').forEach(n => {
+        if (n.getAttribute('onclick')?.includes(`'${name}'`)) n.classList.add('active');
+      });
+      currentPage = name;
+      document.getElementById('page-title').textContent = pageTitles[name];
+      loadPage(name);
+    }
+
+    function refreshCurrentPage() { loadPage(currentPage); }
+
+    function loadPage(name) {
+      const ts = new Date().toLocaleTimeString('es-MX');
+      document.getElementById('page-meta').textContent = `Última actualización: ${ts}`;
+      if (name === 'dashboard')      loadDashboard();
+      if (name === 'usuarios')       loadUsuarios();
+      if (name === 'interacciones')  loadInteracciones();
+      if (name === 'config')         loadConfig();
+    }
+
+    // ============================================================
+    // FETCH HELPER
+    // ============================================================
+    async function apiFetch(path) {
+      const headers = authToken && authToken !== 'offline'
+        ? { 'Authorization': `Bearer ${authToken}` }
+        : {};
+      const res = await fetch(`${API_BASE}${path}`, { headers });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    // ── MOCK DATA (mientras no hay backend) ──────────────────────
+    function mockStats() {
+      return { users: 7, interactions: 142, avg_sentiment: 0.63 };
+    }
+    function mockUsers() {
+      return [
+        { user_id: '123456789012345678', emotion: 'happy',   energy: 78, trust: 82, damage: 0.2, count: 34, last_seen: '2025-01-15T20:30:00', topics: ['música','anime'] },
+        { user_id: '234567890123456789', emotion: 'neutral',  energy: 55, trust: 60, damage: 1.1, count: 21, last_seen: '2025-01-15T18:10:00', topics: ['trabajo'] },
+        { user_id: '345678901234567890', emotion: 'sad',      energy: 30, trust: 40, damage: 3.5, count: 8,  last_seen: '2025-01-14T09:00:00', topics: ['noticias'] },
+        { user_id: '456789012345678901', emotion: 'angry',    energy: 45, trust: 25, damage: 6.0, count: 15, last_seen: '2025-01-13T22:00:00', topics: [] },
+        { user_id: '567890123456789012', emotion: 'neutral',  energy: 65, trust: 70, damage: 0.0, count: 42, last_seen: '2025-01-15T21:55:00', topics: ['gaming','cine'] },
+      ];
+    }
+    function mockInteractions() {
+      return [
+        { id: 1, timestamp: '2025-01-15T21:55:00', user_id: '567890123456789012', message: 'hola sofi qué haces', sentiment: 0.8, emotion_before: 'neutral', emotion_after: 'happy' },
+        { id: 2, timestamp: '2025-01-15T20:30:00', user_id: '123456789012345678', message: 'me aburro mucho hoy', sentiment: 0.2, emotion_before: 'happy', emotion_after: 'neutral' },
+        { id: 3, timestamp: '2025-01-15T18:10:00', user_id: '234567890123456789', message: 'tuve un día horrible', sentiment: -0.5, emotion_before: 'neutral', emotion_after: 'sad' },
+        { id: 4, timestamp: '2025-01-14T09:00:00', user_id: '345678901234567890', message: 'respóndeme rápido', sentiment: -0.1, emotion_before: 'sad', emotion_after: 'sad' },
+        { id: 5, timestamp: '2025-01-13T22:00:00', user_id: '456789012345678901', message: '...', sentiment: -0.3, emotion_before: 'angry', emotion_after: 'angry' },
+      ];
+    }
+    // ────────────────────────────────────────────────────────────
+
+    // ============================================================
+    // DASHBOARD
+    // ============================================================
+    async function loadDashboard() {
+      document.getElementById('sidebar-status-text').textContent = 'Conectando...';
+
+      let stats, interactions;
+      try {
+        stats        = await apiFetch('/api/stats');
+        interactions = await apiFetch('/api/interactions?limit=20');
+        document.getElementById('sidebar-status-text').textContent = 'API conectada';
+      } catch {
+        stats        = mockStats();
+        interactions = mockInteractions();
+        document.getElementById('sidebar-status-text').textContent = 'Modo offline';
+      }
+
+      document.getElementById('stat-users').textContent        = stats.users ?? '—';
+      document.getElementById('stat-interactions').textContent = stats.interactions ?? '—';
+      document.getElementById('stat-sentiment').textContent    = stats.avg_sentiment != null
+        ? stats.avg_sentiment.toFixed(2) : '—';
+
+      const logEl = document.getElementById('recent-log');
+      document.getElementById('recent-count').textContent = `${interactions.length} registros`;
+
+      if (!interactions.length) {
+        logEl.innerHTML = '<div class="log-sys">// sin actividad reciente</div>';
+        return;
+      }
+
+      logEl.innerHTML = interactions.slice(0,15).map(i => {
+        const ts = new Date(i.timestamp).toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' });
+        const uid = i.user_id.slice(-6);
+        const msg = (i.message || '').slice(0, 60);
+        return `<div class="log-line">
+          <span class="log-time">${ts}</span>
+          <span class="log-user">usr_${uid}</span>
+          <span class="log-msg">${escHtml(msg)}</span>
+        </div>`;
+      }).join('') + '<div class="log-sys" style="margin-top:0.5rem">// fin del log</div>';
+    }
+
+    // ============================================================
+    // USUARIOS
+    // ============================================================
+    async function loadUsuarios() {
+      const tbody = document.getElementById('users-tbody');
+      tbody.innerHTML = '<tr><td colspan="8" class="empty"><span class="loading"></span>Cargando...</td></tr>';
+
+      try {
+        usersData = await apiFetch('/api/users');
+      } catch {
+        usersData = mockUsers();
+      }
+
+      document.getElementById('users-count').textContent = `${usersData.length} usuarios`;
+
+      if (!usersData.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty">Sin usuarios registrados</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = usersData.map(u => {
+        const uid   = u.user_id;
+        const short = uid.slice(-8);
+        const ls    = u.last_seen ? new Date(u.last_seen).toLocaleDateString('es-MX') : '—';
+        return `<tr>
+          <td style="color:var(--muted);font-size:0.65rem">${uid.slice(0,10)}…</td>
+          <td>${emotionBadge(u.emotion)}</td>
+          <td>${miniBar(u.energy ?? 0, 'blue')}</td>
+          <td>${miniBar(u.trust  ?? 0, 'blue')}</td>
+          <td>${miniBar(Math.min((u.damage ?? 0)*10,100), 'red')}</td>
+          <td style="color:var(--cyan)">${u.count ?? 0}</td>
+          <td style="font-size:0.65rem;color:var(--muted)">${ls}</td>
+          <td><button class="action-btn" onclick="openProfile('${uid}')">Ver</button></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // ============================================================
+    // INTERACCIONES
+    // ============================================================
+    async function loadInteracciones() {
+      const tbody = document.getElementById('inter-tbody');
+      tbody.innerHTML = '<tr><td colspan="6" class="empty"><span class="loading"></span>Cargando...</td></tr>';
+
+      let interactions;
+      try {
+        interactions = await apiFetch('/api/interactions?limit=50');
+      } catch {
+        interactions = mockInteractions();
+      }
+
+      document.getElementById('inter-count').textContent = `${interactions.length} registros`;
+
+      if (!interactions.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin interacciones</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = interactions.map(i => {
+        const ts  = new Date(i.timestamp).toLocaleString('es-MX');
+        const msg = (i.message || '').slice(0, 60) + ((i.message || '').length > 60 ? '…' : '');
+        const uid = i.user_id.slice(-8);
+        const sentColor = i.sentiment >= 0.3 ? 'var(--green)' : i.sentiment <= -0.2 ? 'var(--red)' : 'var(--muted)';
+        return `<tr>
+          <td style="font-size:0.62rem;color:var(--muted)">${ts}</td>
+          <td style="font-size:0.65rem;color:var(--muted)">…${uid}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(msg)}</td>
+          <td style="color:${sentColor}">${i.sentiment != null ? i.sentiment.toFixed(2) : '—'}</td>
+          <td>${emotionBadge(i.emotion_before)}</td>
+          <td>${emotionBadge(i.emotion_after)}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    // ============================================================
+    // CONFIG
+    // ============================================================
+    async function loadConfig() {
+      let info;
+      try { info = await apiFetch('/api/info'); } catch { info = null; }
+      document.getElementById('cfg-version').textContent = info?.version ?? 'v0.9.3';
+      document.getElementById('cfg-api-url').textContent = API_BASE;
+    }
+
+    async function confirmAction(action) {
+      const labels = {
+        reset_sessions: '¿Limpiar todos los contadores? Esto no afecta perfiles.',
+        purge_old:      '¿Eliminar interacciones de más de 30 días?',
+      };
+      if (!confirm(labels[action] || '¿Confirmar acción?')) return;
+      try {
+        await apiFetch(`/api/admin/${action}`, { method: 'POST' });
+        alert('Acción ejecutada.');
+      } catch {
+        alert('No se pudo conectar con la API. Acción no ejecutada.');
+      }
+    }
+
+    // ============================================================
+    // MODAL PERFIL
+    // ============================================================
+    function openProfile(userId) {
+      const u = usersData.find(x => x.user_id === userId);
+      if (!u) return;
+
+      document.getElementById('modal-userid').textContent = `…${userId.slice(-8)}`;
+
+      const topicsHtml = (u.topics || []).length
+        ? u.topics.map(t => `<span class="topic-tag">${escHtml(t)}</span>`).join('')
+        : '<span style="color:var(--muted);font-size:0.65rem">ninguno</span>';
+
+      const ls = u.last_seen ? new Date(u.last_seen).toLocaleString('es-MX') : '—';
+      const fs = u.first_seen ? new Date(u.first_seen).toLocaleDateString('es-MX') : '—';
+
+      document.getElementById('modal-content').innerHTML = `
+        <div class="modal-field">
+          <label>Emoción</label>
+          <div class="val">${emotionBadge(u.emotion)}</div>
+        </div>
+        <div class="modal-field">
+          <label>Interacciones</label>
+          <div class="val highlight">${u.count ?? 0}</div>
+        </div>
+        <div class="modal-field">
+          <label>Energía</label>
+          <div class="val">${u.energy?.toFixed(1) ?? '—'}</div>
+        </div>
+        <div class="modal-field">
+          <label>Confianza</label>
+          <div class="val">${u.trust?.toFixed(1) ?? '—'}</div>
+        </div>
+        <div class="modal-field">
+          <label>Daño relacional</label>
+          <div class="val" style="color:${(u.damage??0)>3?'var(--red)':'var(--white)'}">${u.damage?.toFixed(2) ?? '0.00'}</div>
+        </div>
+        <div class="modal-field">
+          <label>Estilo comunicación</label>
+          <div class="val">${u.communication_style ?? 'neutral'}</div>
+        </div>
+        <div class="modal-field">
+          <label>Primera vez</label>
+          <div class="val">${fs}</div>
+        </div>
+        <div class="modal-field">
+          <label>Último contacto</label>
+          <div class="val">${ls}</div>
+        </div>
+        <div class="modal-field" style="grid-column:1/-1">
+          <label>Temas de interés</label>
+          <div class="modal-topics">${topicsHtml}</div>
+        </div>
+      `;
+
+      document.getElementById('profile-modal').classList.add('open');
+    }
+
+    function closeModal() {
+      document.getElementById('profile-modal').classList.remove('open');
+    }
+    document.getElementById('profile-modal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeModal();
+    });
+
+    // ============================================================
+    // HELPERS
+    // ============================================================
+    function emotionBadge(emo) {
+      const map = { happy:'happy', neutral:'neutral', sad:'sad', angry:'angry', fearful:'fearful' };
+      const icons = { happy:'😊', neutral:'😐', sad:'😔', angry:'😠', fearful:'😰' };
+      const cls = map[emo] ?? 'neutral';
+      return `<span class="emotion-badge emotion-${cls}">${icons[cls]??'😐'} ${emo??'—'}</span>`;
+    }
+
+    function miniBar(val, color = 'blue') {
+      const pct = Math.min(Math.max(val, 0), 100);
+      return `<div class="mini-bar-wrap">
+        <div class="mini-bar"><div class="mini-bar-fill ${color}" style="width:${pct}%"></div></div>
+        <span class="mini-val">${Math.round(pct)}</span>
+      </div>`;
+    }
+
+    function escHtml(str) {
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+  </script>
+</body>
+</html>

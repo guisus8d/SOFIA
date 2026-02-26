@@ -13,6 +13,7 @@ logs/
 
 # Variables de entorno
 .env
+data/
 
 # Archivos del sistema
 .DS_Store
