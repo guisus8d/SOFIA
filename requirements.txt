@@ -4,3 +4,6 @@ SQLAlchemy
 nltk
 textblob
 loguru
+psycopg2-binary
+fastapi
+uvicorn
