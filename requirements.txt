@@ -7,4 +7,5 @@ loguru
 psycopg2-binary
 fastapi
 uvicorn
-aiohttprequests
+aiohttp
+requests
