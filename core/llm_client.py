@@ -1,6 +1,7 @@
 # core/llm_client.py
 # ============================================================
 # LLMClient — cliente async para Groq API
+# v2 — soporte para historial de conversación
 # ============================================================
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from __future__ import annotations
 import logging
 import asyncio
 import os
-from typing import Optional
+from typing import Optional, List
 
 import requests
 from dotenv import load_dotenv
@@ -28,18 +29,27 @@ class LLMClient:
         self.timeout = timeout
         self.api_key = os.getenv("GROQ_API_KEY", "")
 
-    async def generate(self, prompt: str, system: str = "") -> Optional[str]:
+    async def generate(
+        self,
+        prompt: str,
+        system: str = "",
+        history: Optional[List[dict]] = None,
+    ) -> Optional[str]:
+        """
+        history: lista de dicts con formato OpenAI:
+          [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
+        """
         loop = asyncio.get_event_loop()
         try:
             result = await loop.run_in_executor(
-                None, self._call_sync, prompt, system
+                None, self._call_sync, prompt, system, history or []
             )
             return result
         except Exception as e:
             logger.warning(f"LLMClient error: {e}")
             return None
 
-    def _call_sync(self, prompt: str, system: str) -> Optional[str]:
+    def _call_sync(self, prompt: str, system: str, history: List[dict]) -> Optional[str]:
         if not self.api_key:
             logger.error("GROQ_API_KEY no configurada en .env")
             return None
@@ -47,6 +57,11 @@ class LLMClient:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
+
+        # Insertar historial entre system y el mensaje actual
+        messages.extend(history)
+
+        # Mensaje actual del usuario
         messages.append({"role": "user", "content": prompt})
 
         try:

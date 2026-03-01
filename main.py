@@ -1,6 +1,11 @@
 # main.py
 # ============================================================
-# SocialBot v0.10.0
+# SocialBot v0.12.0
+# CAMBIOS vs v0.11.0:
+#   - Fix historial: el LLM ahora recibe contexto real de conversación
+#   - ServerAgent: bienvenidas con avatar, intro a mods, reactivación
+#   - AvatarGenerator: avatares personalizados via Pollinations.ai
+#   - Detección natural de peticiones de avatar en chat
 # ============================================================
 
 import os
@@ -19,6 +24,8 @@ from core.emotion_engine import EmotionEngine
 from core.decision_engine import DecisionEngine
 from core.user_profile_manager import UserProfileManager
 from core.session_manager import SessionManager
+from discord.avatar_generator import AvatarGenerator
+from discord.server_agent import ServerAgent
 from config import settings
 
 load_dotenv()
@@ -36,6 +43,20 @@ profile_manager = UserProfileManager(db)
 emotion_engine  = EmotionEngine()
 decision        = DecisionEngine()
 session_manager = SessionManager(db)
+avatar_gen      = AvatarGenerator()
+server_agent    = ServerAgent(
+    bot=bot,
+    memory=memory,
+    profile_manager=profile_manager,
+    avatar_generator=avatar_gen,
+)
+
+# Palabras clave para detectar petición de avatar de forma natural
+_AVATAR_TRIGGERS = {
+    "avatar", "foto", "imagen", "picture", "retrato",
+    "cómo me verías", "como me verías", "imagíname", "imagíname",
+    "hazme una imagen", "hazme un avatar", "genera",
+}
 
 
 # ============================================================
@@ -46,14 +67,14 @@ session_manager = SessionManager(db)
 async def on_ready():
     logger.info(f"Sofía conectada como {bot.user}")
     print(f"\n✅ Sofía está en línea como {bot.user} (v{settings.VERSION})\n")
+    # Arrancar loop de reactivación en segundo plano
+    bot.loop.create_task(server_agent.start_reactivation_loop())
 
 
 @bot.event
 async def on_member_join(member):
-    channel = member.guild.system_channel
-    if channel:
-        greeting = session_manager.get_greeting(str(member.id))
-        await channel.send(f"{member.mention} {greeting}")
+    # Bienvenida humanizada con avatar via ServerAgent
+    await server_agent.welcome_member(member)
 
 
 @bot.event
@@ -69,12 +90,29 @@ async def on_message(message):
     if not is_dm and not is_mention:
         return
 
+    # Limpiar el mention del contenido
     content = message.content.replace(f"<@{bot.user.id}>", "").strip()
+    # Limpiar asteriscos sueltos de Discord
+    content = content.strip("*").strip()
     if not content:
         content = "hola"
 
     user_id      = str(message.author.id)
     display_name = message.author.display_name
+
+    # Detectar si el mod/admin habla con Sofía por primera vez
+    asyncio.create_task(server_agent.check_mod_intro(message))
+
+    # Detectar petición de avatar de forma natural
+    content_lower = content.lower()
+    if any(trigger in content_lower for trigger in _AVATAR_TRIGGERS):
+        async with message.channel.typing():
+            await server_agent.generate_avatar_for(
+                user_id=user_id,
+                display_name=display_name,
+                channel=message.channel,
+            )
+        return
 
     async with message.channel.typing():
         result = await process_message(user_id, content, display_name)
@@ -204,25 +242,31 @@ async def estado_cmd(ctx):
     )
 
 
+@bot.command(name="avatar")
+async def avatar_cmd(ctx):
+    """Genera un avatar personalizado para quien ejecuta el comando."""
+    await server_agent.generate_avatar_for(
+        user_id=str(ctx.author.id),
+        display_name=ctx.author.display_name,
+        channel=ctx.channel,
+    )
+
+
 # ============================================================
 # ARRANQUE — FastAPI + Bot en un solo event loop
 # ============================================================
 
-# Importa el router de tu API existente
 from api.app import app as fastapi_app
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Arranca el bot de Discord junto con FastAPI, sin bloquear."""
     if not TOKEN:
         print("❌ No encontré DISCORD_TOKEN en las variables de entorno.")
         yield
         return
 
-    # Intenta conectar con backoff por si hay rate limit al arrancar
     bot_task = asyncio.create_task(_start_bot_with_retry())
     yield
-    # Al apagar Railway, cierra el bot limpiamente
     await bot.close()
     bot_task.cancel()
     try:
@@ -232,17 +276,16 @@ async def lifespan(app: FastAPI):
 
 
 async def _start_bot_with_retry():
-    """Conecta el bot con reintentos exponenciales para sobrevivir 429s."""
     delay = 5
     while True:
         try:
             await bot.start(TOKEN)
-            break  # si termina limpiamente, salimos
+            break
         except discord.errors.HTTPException as e:
             if e.status == 429:
                 logger.warning(f"Rate limit al conectar. Reintentando en {delay}s...")
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, 120)  # backoff hasta 2 minutos máximo
+                delay = min(delay * 2, 120)
             else:
                 logger.error(f"Error HTTP de Discord: {e}")
                 raise
@@ -251,9 +294,7 @@ async def _start_bot_with_retry():
             raise
 
 
-# Registra el lifespan en la app de FastAPI
 fastapi_app.router.lifespan_context = lifespan
-
 
 if __name__ == "__main__":
     uvicorn.run(

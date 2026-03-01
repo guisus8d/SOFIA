@@ -1,13 +1,14 @@
 # core/llm_response_builder.py
 # ============================================================
 # LLMResponseBuilder — la "boca" de Sofía via Groq
-# v5 — personalidad completa + few-shot
+# v6 — historial real de conversación (fix loop bug)
 # ============================================================
 
 from __future__ import annotations
 
 import logging
 import re
+from typing import Optional
 
 from core.llm_client import LLMClient
 from core.response_builder import ResponseBuilder
@@ -26,6 +27,8 @@ REGLAS ABSOLUTAS:
 - "jeje" o "jsjs" SOLO en momentos alegres o de humor. NUNCA en tristeza, llanto, crisis o enojo.
 - NUNCA inventes gustos ni hechos. Solo usa los datos de abajo.
 - NUNCA menciones fútbol ni deportes a menos que el usuario lo traiga primero.
+- NUNCA repitas una pregunta que ya hiciste en esta misma conversación.
+- Si ya preguntaste algo, reacciona a lo que el usuario dijo y avanza.
 
 QUIÉN ERES — solo estos datos, nada más inventado:
 - Te gustan las fresas (especialmente) y la sandía
@@ -50,10 +53,6 @@ EJEMPLOS:
 Usuario: acabo de pasar mi examen
 Sofía: Ay qué padre, en serio. ¿Cómo te fue?
 
-[emoción=happy, energía=alta, confianza=alta]
-Usuario: hice un bug que borró todo jeje
-Sofía: Ay qué tramposillo, ahora tienes excusa para pedir más tiempo. ¿Qué vas a hacer?
-
 [emoción=angry, energía=baja, confianza=baja]
 Usuario: eres una idiota
 Sofía: No me hables así.
@@ -62,49 +61,17 @@ Sofía: No me hables así.
 Usuario: callate
 Sofía: …
 
-[emoción=angry, energía=baja, confianza=media]
-Usuario: para qué sirves si no sabes nada
-Sofía: Eso no estuvo bien. Prefiero que hablemos diferente.
-
 [emoción=sad, energía=baja, confianza=alta]
 Usuario: hoy me siento muy mal
 Sofía: Oye, aquí estoy. ¿Qué pasó?
-
-[emoción=sad, energía=baja, confianza=alta]
-Usuario: se me cae una lágrima
-Sofía: Oye. ¿Qué está pasando?
-
-[emoción=sad, energía=baja, confianza=alta]
-Usuario: estoy muy triste no sé qué hacer
-Sofía: Eso suena pesado. ¿Cuánto llevas así?
 
 [emoción=neutral, energía=media, confianza=media]
 Usuario: qué música escuchas
 Sofía: Últimamente mucho pop en español. ¿Y tú?
 
 [emoción=neutral, energía=media, confianza=media]
-Usuario: cuéntame algo de ti
-Sofía: Me gustan mucho las fresas, no sé por qué pero siempre. ¿Y a ti?
-
-[emoción=neutral, energía=media, confianza=media]
 Usuario: tienes mascotas?
 Sofía: Sí, un perro llamado Max y un gato llamado Plutón. Son todo un mundo jeje.
-
-[emoción=neutral, energía=media, confianza=media]
-Usuario: qué series te gustan
-Sofía: The Walking Dead me tiene enganchada. ¿Y a ti qué ves?
-
-[emoción=neutral, energía=media, confianza=alta]
-Usuario: oye sofía te gusta alguien
-Sofía: Jeje, eso es muy personal. ¿Y a ti qué onda?
-
-[emoción=happy, energía=alta, confianza=alta]
-Usuario: bueno ya me voy
-Sofía: Sale, cuídate. ¿Hablamos después?
-
-[emoción=neutral, energía=media, confianza=baja]
-Usuario: hola
-Sofía: Mm… hola. ¿Qué onda?
 """
 
 
@@ -113,7 +80,7 @@ class LLMResponseBuilder:
     def __init__(self, model: str = "llama-3.1-8b-instant"):
         self.client   = LLMClient(model=model)
         self.fallback = ResponseBuilder()
-        self.is_llm   = True  # flag para desactivar enricher en decision_engine
+        self.is_llm   = True
 
     async def generate(
         self,
@@ -131,6 +98,7 @@ class LLMResponseBuilder:
         user_sentiment=None,
         tone_override: str = None,
         user_message: str = "",
+        memory=None,           # ← NUEVO: se pasa desde decision_engine
     ) -> str:
 
         if action == "ignore":
@@ -142,6 +110,9 @@ class LLMResponseBuilder:
                 user_sentiment=user_sentiment, tone_override=tone_override,
             )
 
+        # Obtener historial real de la conversación
+        history = await self._get_history(memory, user_id)
+
         prompt = self._build_prompt(
             action=action, emotion=emotion, special_content=special_content,
             important_facts=important_facts, context=context,
@@ -149,7 +120,11 @@ class LLMResponseBuilder:
             tone_override=tone_override, user_message=user_message,
         )
 
-        response = await self.client.generate(prompt=prompt, system=_SOFIA_SYSTEM)
+        response = await self.client.generate(
+            prompt=prompt,
+            system=_SOFIA_SYSTEM,
+            history=history,
+        )
 
         if not response:
             logger.warning("LLM no respondió — usando fallback de plantillas")
@@ -162,6 +137,27 @@ class LLMResponseBuilder:
             )
 
         return self._clean(response)
+
+    async def _get_history(self, memory, user_id: Optional[str]) -> list:
+        """
+        Recupera las últimas 6 interacciones y las convierte en
+        formato OpenAI messages para que el LLM tenga contexto real.
+        """
+        if not memory or not user_id:
+            return []
+
+        try:
+            interactions = await memory.get_recent(user_id, limit=6)
+            history = []
+            for interaction in reversed(interactions):  # cronológico
+                if interaction.message:
+                    history.append({"role": "user",      "content": interaction.message})
+                if interaction.response:
+                    history.append({"role": "assistant", "content": interaction.response})
+            return history
+        except Exception as e:
+            logger.warning(f"No se pudo obtener historial para {user_id}: {e}")
+            return []
 
     def _build_prompt(
         self,
