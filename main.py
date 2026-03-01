@@ -118,12 +118,15 @@ async def on_message(message):
             )
         return
 
-    # Caso 2: el último action fue avatar y mandan un nombre/estilo corto
-    # ej: reciben su avatar y luego dicen "goku" o "cyberpunk"
+    # Caso 2: el último action fue avatar EXITOSO y mandan un personaje/estilo
+    # Solo si el mensaje parece un nombre/estilo, no una conversación normal
+    _CONVERSACION_NORMAL = {"hola", "ok", "si", "sí", "no", "gracias", "jaja", "xd", "lol", "bueno", "bien"}
     if (
         server_agent.last_action.get(user_id) == "avatar"
-        and len(content.split()) <= 5
+        and len(content.split()) <= 3
+        and content_lower not in _CONVERSACION_NORMAL
         and not content.endswith("?")
+        and not any(c in content for c in ["cómo", "qué", "por qué", "cuando"])
     ):
         async with message.channel.typing():
             await server_agent.generate_avatar_for(
@@ -133,6 +136,9 @@ async def on_message(message):
                 subject=content,
             )
         return
+
+    # Si llega aquí, limpiar el contexto de avatar
+    server_agent.last_action.pop(user_id, None)
 
     # ── Conversación normal ──────────────────────────────────
     async with message.channel.typing():

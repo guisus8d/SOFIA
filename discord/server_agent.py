@@ -181,8 +181,9 @@ class ServerAgent:
         await thinking_msg.delete()
 
         if not img_bytes:
-            await channel.send("No pude generar la imagen ahora, Pollinations tardó demasiado. Intenta de nuevo.")
-            return
+            # Limpiar para que el siguiente mensaje no dispare otro intento
+            self.last_action.pop(user_id, None)
+            await channel.send("No pude generar la imagen ahora, intenta de nuevo en un momento.")
 
         reveal = random.choice(_AVATAR_REVEAL_MESSAGES).format(name=display_name)
         file   = discord.File(img_bytes, filename=filename)
