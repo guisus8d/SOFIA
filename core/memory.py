@@ -52,6 +52,10 @@ class Memory:
             logger.error(f"Error recuperando interacciones: {e}")
             return []
 
+    async def get_recent(self, user_id: str, limit: int = 6) -> List[Interaction]:
+        """Alias para llm_response_builder — historial real de conversación para el LLM."""
+        return await self.recall_user(user_id, limit)
+
     async def get_recent_interactions(self, user_id: str, limit: int = 3) -> List[Interaction]:
         """Retorna las últimas 'limit' interacciones con el usuario (ventana contextual v0.3.5)"""
         return await self.recall_user(user_id, limit)

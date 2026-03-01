@@ -449,6 +449,7 @@ class DecisionEngine:
             user_sentiment    = sentiment,
             tone_override     = "neutral" if _post_retraction else None,
             user_message      = message,
+            memory            = memory,   # ← historial real de conversación
         )
 
         # PRIORIDAD 8 — Enriquecer (solo con plantillas, no con LLM)
