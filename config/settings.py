@@ -108,3 +108,25 @@ COOLDOWN_SEMANTIC_RECALL   = 6      # mensajes mínimos entre recalls semántico
 COOLDOWN_PERSONA_SHARE     = 5      # mensajes mínimos entre auto-shares de Sofía
 SOFIA_MOOD_SHARE_PROB      = 0.12   # probabilidad de que Sofía mencione su humor al responder
 SOFIA_REACTION_PROB        = 0.25   # prob. de reacción con algo propio (en vez de solo preguntar)
+
+# ============================================================
+# PARCHE PARA config/settings.py
+# SocialBot v0.10.0
+#
+# Añade este bloque al FINAL de tu settings.py
+# ============================================================
+
+# ── Herramientas externas (v0.10.0) ──────────────────────────────
+# Controla cuándo y cómo Sofía usa búsqueda web.
+
+TOOLS_ENABLED            = True    # master switch — False desactiva todo
+SEARCH_ENABLED           = True    # activa/desactiva solo búsqueda web
+SEARCH_MIN_TRUST         = 0.0     # confianza mínima para buscar (0 = siempre)
+SEARCH_COOLDOWN          = 3       # mensajes mínimos entre búsquedas del mismo usuario
+SEARCH_MAX_SNIPPET_LEN   = 280     # chars máximos del snippet antes de cortar
+DISCORD_INITIATIVE_COOLDOWN_HOURS   = 0.01
+DISCORD_INITIATIVE_PROBABILITY      = 0.5   # con razón temática
+DISCORD_INITIATIVE_PROBABILITY_IDLE = 0.15  # sin razón, solo silencio
+
+
+

@@ -1,15 +1,8 @@
-# discord_bot.py
+# main.py
 # ============================================================
-# SocialBot v0.9.3
-# CAMBIOS vs v0.9.2:
-#   - NUEVO: Mini-embed de estado visible después de CADA mensaje
-#     de Sofía (no solo con !estado). Barras de energía/confianza/daño
-#     en tiempo real para debugging visual permanente.
-#   - process_message ahora retorna dict con response + profile
-#     para poder construir el embed inline.
+# SocialBot v0.10.0
 # ============================================================
 
-import asyncio
 import os
 import discord
 from discord.ext import commands
@@ -39,108 +32,6 @@ profile_manager = UserProfileManager(db)
 emotion_engine  = EmotionEngine()
 decision        = DecisionEngine()
 session_manager = SessionManager(db)
-
-
-# ============================================================
-# HELPERS VISUALES
-# ============================================================
-
-def _bar(value: float, max_val: float = 100.0, length: int = 10) -> str:
-    """Barra de progreso Unicode. Ej: ████░░░░░░"""
-    filled = round((min(max(value, 0), max_val) / max_val) * length)
-    return "█" * filled + "░" * (length - filled)
-
-def _emotion_emoji(emo_value: str) -> str:
-    return {
-        "happy":   "😊",
-        "neutral": "😐",
-        "sad":     "😔",
-        "angry":   "😠",
-        "fearful": "😰",
-    }.get(emo_value, "😐")
-
-def _energy_color(energy: float, trust: float, emo: str) -> discord.Color:
-    if emo == "happy":   return discord.Color.from_rgb(100, 200, 120)
-    if emo == "angry":   return discord.Color.from_rgb(210, 70,  70)
-    if emo == "sad":     return discord.Color.from_rgb(90,  120, 200)
-    if emo == "fearful": return discord.Color.from_rgb(170, 120, 210)
-    if energy > 60 and trust > 60:
-        return discord.Color.from_rgb(100, 190, 210)
-    return discord.Color.from_rgb(140, 140, 140)
-
-def _conflict_status(user_id: str) -> tuple[str, str]:
-    """Retorna (icono, texto) del estado de conflicto."""
-    agg = decision.aggression_count.get(user_id, 0)
-    rec = decision.recovery_needed.get(user_id, 0)
-    if agg >= 5:
-        return "🚫", f"Bloqueada ({agg} agresiones)"
-    if agg > 0 and rec > 0:
-        return "🔄", f"Recovery — {rec} msgs restantes"
-    if agg > 0:
-        return "⚠️", f"Conflicto ({agg} agresiones)"
-    return "✅", "Normal"
-
-def build_mini_embed(profile, user_id: str, action: str) -> discord.Embed:
-    """
-    Embed compacto que se muestra debajo de CADA respuesta de Sofía.
-    Muestra energía, confianza, daño y estado de conflicto en tiempo real.
-    """
-    e       = profile.emotional_state
-    emo_val = e.primary_emotion.value
-    dmg     = profile.relationship_damage
-    dmg_pct = min(dmg * 10, 100)
-
-    icon, conflict_txt = _conflict_status(user_id)
-
-    # Energía: color de barra según nivel
-    energy_bar  = _bar(e.energy)
-    trust_bar   = _bar(e.trust)
-    dmg_bar     = _bar(dmg_pct)
-
-    # Etiqueta de acción tomada
-    action_labels = {
-        "respond":       "💬 responder",
-        "boundary":      "🛑 límite",
-        "silence":       "🤐 silencio",
-        "limit":         "🚫 bloqueo",
-        "recovery":      "🔄 recovery",
-        "memory_check":  "🧠 memoria",
-        "opinion":       "💭 opinión",
-        "ignore":        "👁️ ignorar",
-        "identity":      "🪞 identidad",
-        "direct_answer": "🎯 respuesta directa",
-        "initiative":    "✨ iniciativa",
-        "repeat":        "🔁 repetición",
-    }
-    action_txt = action_labels.get(action, f"• {action}")
-
-    # Trust como nivel de relación legible
-    if e.trust >= 75:    rel = "Alta 💚"
-    elif e.trust >= 50:  rel = "Media 💛"
-    elif e.trust >= 30:  rel = "Baja 🧡"
-    else:                rel = "Rota ❤️‍🔥"
-
-    embed = discord.Embed(color=_energy_color(e.energy, e.trust, emo_val))
-    embed.add_field(
-        name=f"{_emotion_emoji(emo_val)} Sofía interna",
-        value=(
-            f"⚡ `{energy_bar}` {e.energy:.0f}\n"
-            f"💙 `{trust_bar}` {e.trust:.0f}\n"
-            f"💔 `{dmg_bar}` daño {dmg:.1f}"
-        ),
-        inline=True,
-    )
-    embed.add_field(
-        name="📊 Relación",
-        value=(
-            f"Vínculo: {rel}\n"
-            f"{icon} {conflict_txt}\n"
-            f"Acción: {action_txt}"
-        ),
-        inline=True,
-    )
-    embed.set_footer(text=f"emoción: {emo_val}  ·  !estado para detalle completo  ·  !reset para limpiar")
-    return embed
 
 
 # ============================================================
@@ -184,18 +75,12 @@ async def on_message(message):
     async with message.channel.typing():
         result = await process_message(user_id, content, display_name)
 
-    # 1. Respuesta de texto de Sofía
     await message.reply(result["response"])
-
-    # 2. Mini-embed de estado justo debajo (en el mismo canal, no como reply)
-    mini = build_mini_embed(result["profile"], user_id, result["action"])
-    await message.channel.send(embed=mini)
-
     await bot.process_commands(message)
 
 
 # ============================================================
-# PROCESAR MENSAJE — ahora retorna dict
+# PROCESAR MENSAJE
 # ============================================================
 
 async def process_message(user_id: str, message: str, display_name: str = "tú") -> dict:
@@ -265,7 +150,6 @@ async def sofia_info(ctx):
 
 @bot.command(name="reset")
 async def reset_cmd(ctx):
-    """!reset — resetea contadores de sesión (testing)"""
     user_id = str(ctx.author.id)
     decision.aggression_count.pop(user_id, None)
     decision.recovery_needed.pop(user_id, None)
@@ -280,7 +164,6 @@ async def reset_cmd(ctx):
 
 @bot.command(name="estado")
 async def estado_cmd(ctx):
-    """!estado — embed completo con todo el detalle interno"""
     user_id     = str(ctx.author.id)
     profile     = await profile_manager.get_or_create_profile(user_id)
     e           = profile.emotional_state
@@ -288,34 +171,33 @@ async def estado_cmd(ctx):
     mood_reason = emotion_engine.get_mood_reason(user_id) or "sin razón particular"
     night_mode  = emotion_engine.is_night_mode()
     dmg         = profile.relationship_damage
-    dmg_pct     = min(dmg * 10, 100)
 
     agg = decision.aggression_count.get(user_id, 0)
     rec = decision.recovery_needed.get(user_id, 0)
-    icon, conflict_txt = _conflict_status(user_id)
 
-    embed = discord.Embed(
-        title=f"{_emotion_emoji(emo_val)}  Estado completo de Sofía",
-        description=f"Usuario: **{ctx.author.display_name}** · emoción: `{emo_val.upper()}`",
-        color=_energy_color(e.energy, e.trust, emo_val),
-    )
-    embed.add_field(name="⚡ Energía",         value=f"`{_bar(e.energy, length=14)}` **{e.energy:.1f}/100**",  inline=False)
-    embed.add_field(name="💙 Confianza",        value=f"`{_bar(e.trust,  length=14)}` **{e.trust:.1f}/100**",   inline=False)
-    embed.add_field(name="💔 Daño relacional",  value=f"`{_bar(dmg_pct,  length=14)}` **{dmg:.2f}** (raw)",     inline=False)
-    embed.add_field(name="🧠 Razón del estado", value=f"_{mood_reason}_",                                        inline=False)
-    embed.add_field(name="📋 Conflicto",        value=f"{icon} {conflict_txt}",     inline=True)
-    embed.add_field(name="🌙 Modo noche",       value="Sí" if night_mode else "No", inline=True)
-    embed.add_field(name="💬 Frases guardadas", value=str(len(profile.important_quotes)), inline=True)
+    if agg >= 5:
+        conflict = f"🚫 Bloqueada ({agg} agresiones)"
+    elif agg > 0 and rec > 0:
+        conflict = f"🔄 Recovery — {rec} msgs restantes"
+    elif agg > 0:
+        conflict = f"⚠️ Conflicto ({agg} agresiones)"
+    else:
+        conflict = "✅ Normal"
 
     sem = getattr(profile, "semantic_facts", {})
+    facts_text = ""
     if sem:
-        facts_preview = "\n".join(f"`{k}`: {v}" for k, v in list(sem.items())[:6])
-        embed.add_field(name="🗂️ Lo que sé de ti", value=facts_preview, inline=False)
-    else:
-        embed.add_field(name="🗂️ Lo que sé de ti", value="_Nada guardado aún_", inline=False)
+        facts_text = "\n".join(f"  {k}: {v}" for k, v in list(sem.items())[:6])
 
-    embed.set_footer(text=f"SocialBot {settings.VERSION} · !reset para limpiar contadores")
-    await ctx.send(embed=embed)
+    await ctx.send(
+        f"**Estado de Sofía contigo**\n"
+        f"Emoción: `{emo_val}` · Energía: `{e.energy:.0f}` · Confianza: `{e.trust:.0f}`\n"
+        f"Daño relacional: `{dmg:.2f}` · Modo noche: `{'sí' if night_mode else 'no'}`\n"
+        f"Estado: {conflict}\n"
+        f"Razón: _{mood_reason}_\n"
+        f"Frases guardadas: `{len(profile.important_quotes)}`"
+        + (f"\nLo que sé de ti:\n{facts_text}" if facts_text else "")
+    )
 
 
 # ============================================================

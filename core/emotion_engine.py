@@ -1,70 +1,79 @@
 # core/emotion_engine.py
 # ============================================================
-# SocialBot v0.8.0
-# FIX: Indentación rota del archivo original (emotion_engine estaba
-#      accidentalmente anidado dentro de _get_secret).
-# NUEVO: mood_reason — Sofía sabe POR QUÉ está en cierto estado.
-#        Permite respuestas como "todavía pienso en lo que me dijiste".
-# NUEVO: Modo noche — energy_decay más suave de noche, tono más íntimo.
+# SocialBot v0.12.4
+# CAMBIOS vs v0.12.0:
+#   - FIX Bug VERBOSITY #6: se calcula is_flood via Fatigue.is_char_flood()
+#     y se pasa al message_event. El registry ya lo usa para forzar
+#     verbosity mínimo "medium" en flood aunque fatigue sea baja.
+#   - FIX Bug STRESS_COMBO #8: retractaciones ("era broma", "estoy bien",
+#     "no era en serio") con sentiment alto caían a affection_event,
+#     generando respuesta afectuosa + jeje inapropiado post-crisis.
+#     Ahora se detectan antes del check de sentiment y caen a message_event.
+#   - MANTIENE: todo lo demás de v0.12.0 intacto.
 # ============================================================
 
 from typing import Optional
 from models.state import EmotionalState, Emotion
 from models.interaction import Interaction
 from core.memory import Memory
+from core.emotion.emotion_registry import EmotionRegistry
+from core.emotion.event_bus import (
+    message_event, aggression_event, repair_event,
+    affection_event, time_event,
+)
+from core.emotion.modules.fatigue import Fatigue
 from utils.logger import logger
 from config import settings
 import time
 from datetime import datetime
 
-MAX_DELTA_PER_MESSAGE = 3.0
-
 
 class EmotionEngine:
-    """Gestiona estados emocionales por usuario."""
+    """
+    Fachada pública del motor emocional.
+    Mantiene la misma API que v0.8.0 para no romper nada.
+    Internamente delega toda la lógica al EmotionRegistry modular.
+    """
 
-    # Razones internas que Sofía puede referenciar en sus respuestas
     MOOD_REASONS = {
-        "aggression":    "alguien fue grosero conmigo",
-        "affection":     "alguien fue muy amable",
-        "long_silence":  "pasó mucho tiempo sin hablar",
-        "good_vibes":    "la conversación estuvo muy buena",
-        "repetition":    "siento que la conversación se estancó",
-        "recovery":      "estamos arreglando las cosas poco a poco",
+        "aggression":   "alguien fue grosero conmigo",
+        "affection":    "alguien fue muy amable",
+        "long_silence": "pasó mucho tiempo sin hablar",
+        "good_vibes":   "la conversación estuvo muy buena",
+        "repetition":   "siento que la conversación se estancó",
+        "recovery":     "estamos arreglando las cosas poco a poco",
     }
 
     def __init__(self, initial_state: Optional[EmotionalState] = None):
         self.state = initial_state or EmotionalState()
-        self.mood_decay = 0.95
         self.last_update_time = time.time()
-        # mood_reason por usuario { user_id: str }
-        self._mood_reasons: dict = {}
+        # Registry global (para llamadas sin user_id explícito)
+        self._registry = EmotionRegistry()
+        # Registry por usuario { user_id: EmotionRegistry }
+        self._registries: dict[str, EmotionRegistry] = {}
 
     # ==========================================================
-    # MÉTODO GLOBAL
+    # API PÚBLICA — idéntica a v0.8.0
     # ==========================================================
 
     async def process_interaction(
         self,
         interaction: Interaction,
-        memory: Memory
+        memory: Memory,
     ) -> EmotionalState:
         updated = await self.process_interaction_for_state(
             state=self.state,
             interaction=interaction,
-            memory=memory
+            memory=memory,
         )
         self.state = updated
         self.last_update_time = time.time()
         logger.info(
             f"Emoción actualizada: {updated.primary_emotion.value} "
-            f"(energía={updated.energy:.1f}, confianza={updated.trust:.1f})"
+            f"(energía={updated.energy:.1f}, confianza={updated.trust:.1f}, "
+            f"tono={updated.tone})"
         )
         return updated
-
-    # ==========================================================
-    # MÉTODO POR ESTADO EXTERNO
-    # ==========================================================
 
     async def process_interaction_for_state(
         self,
@@ -76,104 +85,119 @@ class EmotionEngine:
         aggression_impact: dict = None,
     ) -> EmotionalState:
 
-        self._apply_time_decay_to_state(state, interaction.timestamp.timestamp())
+        registry = self._get_registry(interaction.user_id)
+        ts = interaction.timestamp.timestamp()
+
+        # ── 1. Decay por tiempo ──────────────────────────────
+        if state.last_updated:
+            hours = (ts - state.last_updated) / 3600
+            if hours > 0:
+                registry.apply_decay(hours, state)
+
+        # ── 2. Construir evento ──────────────────────────────
+        msg = getattr(interaction, "message", "")
+
+        # FIX v0.12.4 Bug 1: detectar flood antes de clasificar el evento
+        _is_flood = Fatigue.is_char_flood(msg)
+
+        # FIX v0.12.4 Bug 3: retractaciones ("era broma", "estoy bien", etc.)
+        # pueden tener sentiment alto y caer a affection_event por error.
+        # Se detectan aquí y se fuerzan a message_event para que
+        # decision_engine las maneje como retractación, no como afecto.
+        _RETRACTION_MARKERS = (
+            "era broma", "es broma", "fue broma",
+            "estoy bien", "ya estoy bien", "no era en serio",
+            "no lo decía en serio", "no fue en serio",
+            "solo bromeaba", "solo era broma",
+        )
+        _is_retraction = any(m in msg.lower() for m in _RETRACTION_MARKERS)
 
         if aggression_impact:
-            state.energy = self._clamp(state.energy + aggression_impact.get("energy", 0))
-            state.trust  = self._clamp(state.trust  + aggression_impact.get("trust",  0))
-            # Registrar razón del estado
-            self._mood_reasons[interaction.user_id] = self.MOOD_REASONS["aggression"]
+            # Agresión detectada por AggressionDetector
+            agg_score = min(
+                abs(aggression_impact.get("energy", -5)) / 15.0,
+                1.0
+            )
+            event = aggression_event(
+                user_id=interaction.user_id,
+                timestamp=ts,
+                aggression_score=agg_score,
+                sentiment=interaction.sentiment,
+            )
+
+        elif repair_multiplier > 1.0 and interaction.sentiment >= 0:
+            # Usuario se está disculpando
+            repair_score = min((repair_multiplier - 1.0) / 2.0, 1.0)
+            event = repair_event(
+                user_id=interaction.user_id,
+                timestamp=ts,
+                repair_score=repair_score,
+                sentiment=interaction.sentiment,
+            )
+
+        elif interaction.sentiment > 0.6 and not _is_retraction and not _is_flood:
+            # Afecto fuerte — solo si no es retractación ni flood
+            event = affection_event(
+                user_id=interaction.user_id,
+                timestamp=ts,
+                affection_score=interaction.sentiment,
+                sentiment=interaction.sentiment,
+            )
 
         else:
-            sentiment_impact = interaction.sentiment * 15
-            history_impact   = memory.get_average_sentiment_for(interaction.user_id) * 10
-            global_impact    = memory.get_recent_global_sentiment() * 5
-            total_impact     = sentiment_impact + history_impact + global_impact
+            # Mensaje normal (incluye retracciones y flood)
+            event = message_event(
+                user_id=interaction.user_id,
+                timestamp=ts,
+                sentiment=interaction.sentiment,
+                message_len=len(msg),
+                is_question="?" in msg,
+                is_flood=_is_flood,
+            )
 
-            if interaction.sentiment >= 0 and repair_multiplier > 1.0:
-                total_impact += settings.REPAIR_ENERGY_BOOST * repair_multiplier
-                trust_repair  = settings.REPAIR_TRUST_BOOST * repair_multiplier
-                state.trust  = self._clamp(
-                    state.trust + self._cap_delta(trust_repair)
-                )
-                self._mood_reasons[interaction.user_id] = self.MOOD_REASONS["recovery"]
+        # ── 3. Procesar con el registry ──────────────────────
+        registry.process(event, state)
 
-            elif interaction.sentiment > 0.6:
-                self._mood_reasons[interaction.user_id] = self.MOOD_REASONS["affection"]
-            elif interaction.sentiment > 0.3:
-                self._mood_reasons[interaction.user_id] = self.MOOD_REASONS["good_vibes"]
-
-            energy_delta = total_impact * 0.3
-            trust_delta  = total_impact * 0.2
-
-            state.energy = self._clamp(state.energy + self._cap_delta(energy_delta))
-            state.trust  = self._clamp(state.trust  + self._cap_delta(trust_delta))
-
-        self._update_primary_emotion(state)
-        state.last_updated = interaction.timestamp.timestamp()
+        state.last_updated = ts
         return state
 
     # ==========================================================
-    # MOOD REASON — para que Sofía referencie su estado
+    # MOOD REASON
     # ==========================================================
 
     def get_mood_reason(self, user_id: str) -> Optional[str]:
-        """Retorna la razón del estado emocional actual (o None)."""
-        return self._mood_reasons.get(user_id)
+        registry = self._registries.get(user_id)
+        if not registry:
+            return None
+        reason_key = registry.last_reason
+        return self.MOOD_REASONS.get(reason_key)
 
     def clear_mood_reason(self, user_id: str):
-        self._mood_reasons.pop(user_id, None)
+        registry = self._registries.get(user_id)
+        if registry:
+            registry._last_reason = ""
 
     # ==========================================================
     # MODO NOCHE
     # ==========================================================
 
     def is_night_mode(self) -> bool:
-        """Retorna True si la hora actual está en modo noche."""
-        hour = datetime.now().hour
+        hour  = datetime.now().hour
         start = settings.NIGHT_MODE_START_HOUR
         end   = settings.NIGHT_MODE_END_HOUR
-        # Maneja el cruce de medianoche (ej: 22-6)
         if start > end:
             return hour >= start or hour < end
         return start <= hour < end
 
     # ==========================================================
-    # LÓGICA INTERNA
+    # ACCESO A REGISTRY POR USUARIO
     # ==========================================================
 
-    def _cap_delta(self, delta: float) -> float:
-        return max(-MAX_DELTA_PER_MESSAGE, min(MAX_DELTA_PER_MESSAGE, delta))
+    def get_registry(self, user_id: str) -> EmotionRegistry:
+        """Acceso directo al registry de un usuario (para debug/admin)."""
+        return self._get_registry(user_id)
 
-    def _apply_time_decay_to_state(self, state: EmotionalState, reference_time: float):
-        if not state.last_updated:
-            return
-        hours_passed = (reference_time - state.last_updated) / 3600
-        if hours_passed <= 0:
-            return
-        decay_factor = self.mood_decay ** hours_passed
-        # FIX BUG 12: el decay solo afecta energía (estado de ánimo del momento),
-        # no la confianza (relación construida). Un usuario que no habla por días
-        # no debería recibir respuestas hostiles porque su trust llegó a 0.
-        state.energy = self._clamp(state.energy * decay_factor)
-        # trust decae mucho más lentamente: 1% por hora en vez del 5%
-        slow_trust_decay = 0.99 ** hours_passed
-        state.trust  = self._clamp(state.trust * slow_trust_decay)
-
-    def _update_primary_emotion(self, state: EmotionalState):
-        e = state.energy
-        t = state.trust
-
-        if e > 65 and t > 60:
-            state.primary_emotion = Emotion.HAPPY
-        elif e < 25:
-            state.primary_emotion = Emotion.SAD
-        elif t < 25:
-            state.primary_emotion = Emotion.ANGRY
-        elif e < 40 and t < 40:
-            state.primary_emotion = Emotion.FEARFUL
-        else:
-            state.primary_emotion = Emotion.NEUTRAL
-
-    def _clamp(self, value: float) -> float:
-        return max(0.0, min(100.0, value))
+    def _get_registry(self, user_id: str) -> EmotionRegistry:
+        if user_id not in self._registries:
+            self._registries[user_id] = EmotionRegistry()
+        return self._registries[user_id]

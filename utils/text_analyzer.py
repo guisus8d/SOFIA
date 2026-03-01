@@ -31,6 +31,19 @@ class TextAnalyzer:
             "mal", "peor", "odio", "estupido", "tonto", "feo",
             "horrible", "terrible", "asco", "imbecil", "idiota",
             "hate", "bad", "stupid", "odias", "detesto", "aborrezco",
+            # FIX v0.9.1: estados emocionales negativos del USUARIO
+            # Antes "estoy triste", "me siento solo" daban sentiment=0.0
+            # porque estas palabras no existían en el diccionario.
+            "triste", "tristeza", "solo", "sola", "soledad",
+            "llorar", "lloro", "llorando", "llore",
+            "deprimido", "deprimida", "depresion",
+            "angustia", "angustiado", "angustiada",
+            "ansioso", "ansiosa", "ansiedad",
+            "preocupado", "preocupada",
+            "asustado", "asustada", "miedo",
+            "cansado", "cansada", "agotado", "agotada",
+            "perdido", "perdida", "vacio", "vacia",
+            "desesperado", "desesperada",
         }
 
         # ── Frases multi-palabra (FIX: antes estaban en positive_words) ──
@@ -43,6 +56,14 @@ class TextAnalyzer:
         self.negative_phrases = [
             "no sirves", "eres un fracaso", "me cae mal",
             "no me gustas", "me haces enojar",
+            # FIX v0.9.1: frases de malestar emocional del usuario
+            "me siento solo", "me siento sola", "me siento triste",
+            "me siento mal", "me siento perdido", "me siento perdida",
+            "me siento vacio", "me siento vacia",
+            "todo me sale mal", "nadie me entiende", "nadie me quiere",
+            "nadie me comprende", "que mal dia", "estoy mal",
+            "no tengo a nadie", "no le importo a nadie",
+            "me siento solo en el mundo", "no hay nadie para mi",
         ]
 
         self.intensifiers = {
