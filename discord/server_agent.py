@@ -151,6 +151,20 @@ class ServerAgent:
 
         thinking_msg = await channel.send(random.choice(_THINKING_MESSAGES))
 
+        # Actualizar el mensaje cada 10s para que Discord no parezca colgado
+        async def keep_alive():
+            dots = [".", "..", "..."]
+            i = 0
+            while True:
+                await asyncio.sleep(10)
+                try:
+                    await thinking_msg.edit(content=f"Generando{dots[i % 3]}")
+                    i += 1
+                except Exception:
+                    break
+
+        keep_task = asyncio.create_task(keep_alive())
+
         try:
             profile = await self.profile_manager.get_or_create_profile(user_id)
         except Exception:
@@ -163,6 +177,7 @@ class ServerAgent:
             subject=subject,
         )
 
+        keep_task.cancel()
         await thinking_msg.delete()
 
         if not img_bytes:

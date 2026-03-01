@@ -115,10 +115,12 @@ class AvatarGenerator:
         logger.info(f"Generando avatar | {display_name} | subject={subject}")
 
         try:
-            async with aiohttp.ClientSession() as session:
+            # Pollinations puede tardar hasta 90s generando — es normal
+            connector = aiohttp.TCPConnector(limit=5)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(
                     url,
-                    timeout=aiohttp.ClientTimeout(total=45),
+                    timeout=aiohttp.ClientTimeout(total=90, connect=15),
                     headers={"User-Agent": "SofiaBot/1.0"},
                 ) as resp:
                     if resp.status != 200:
@@ -132,6 +134,9 @@ class AvatarGenerator:
 
                     return io.BytesIO(data), f"avatar_{user_id[:8]}.png"
 
+        except asyncio.TimeoutError:
+            logger.warning("Pollinations tardó demasiado (>90s)")
+            return None, ""
         except Exception as e:
             logger.error(f"Error descargando avatar: {e}")
             return None, ""
