@@ -1,11 +1,6 @@
 # main.py
 # ============================================================
 # SocialBot v0.12.0
-# CAMBIOS vs v0.11.0:
-#   - Fix historial: el LLM ahora recibe contexto real de conversación
-#   - ServerAgent: bienvenidas con avatar, intro a mods, reactivación
-#   - AvatarGenerator: avatares personalizados via Pollinations.ai
-#   - Detección natural de peticiones de avatar en chat
 # ============================================================
 
 import os
@@ -51,11 +46,11 @@ server_agent    = ServerAgent(
     avatar_generator=avatar_gen,
 )
 
-# Palabras clave para detectar petición de avatar de forma natural
+# Palabras que activan generación de avatar
 _AVATAR_TRIGGERS = {
     "avatar", "foto", "imagen", "picture", "retrato",
-    "cómo me verías", "como me verías", "imagíname", "imagíname",
-    "hazme una imagen", "hazme un avatar", "genera",
+    "hazme", "genérame", "generame", "cómo me verías",
+    "como me verias", "imagíname", "imaginame",
 }
 
 
@@ -67,13 +62,11 @@ _AVATAR_TRIGGERS = {
 async def on_ready():
     logger.info(f"Sofía conectada como {bot.user}")
     print(f"\n✅ Sofía está en línea como {bot.user} (v{settings.VERSION})\n")
-    # Arrancar loop de reactivación en segundo plano
     bot.loop.create_task(server_agent.start_reactivation_loop())
 
 
 @bot.event
 async def on_member_join(member):
-    # Bienvenida humanizada con avatar via ServerAgent
     await server_agent.welcome_member(member)
 
 
@@ -90,30 +83,58 @@ async def on_message(message):
     if not is_dm and not is_mention:
         return
 
-    # Limpiar el mention del contenido
-    content = message.content.replace(f"<@{bot.user.id}>", "").strip()
-    # Limpiar asteriscos sueltos de Discord
-    content = content.strip("*").strip()
+    # Limpiar mention y asteriscos
+    content = message.content.replace(f"<@{bot.user.id}>", "").strip().strip("*").strip()
     if not content:
         content = "hola"
 
     user_id      = str(message.author.id)
     display_name = message.author.display_name
 
-    # Detectar si el mod/admin habla con Sofía por primera vez
+    # Intro a moderadores (background, no bloquea)
     asyncio.create_task(server_agent.check_mod_intro(message))
 
-    # Detectar petición de avatar de forma natural
     content_lower = content.lower()
-    if any(trigger in content_lower for trigger in _AVATAR_TRIGGERS):
+
+    # ── Detección de avatar ──────────────────────────────────
+    # Caso 1: trigger explícito ("hazme un avatar", "foto", etc.)
+    avatar_subject = None
+    is_avatar_request = any(t in content_lower for t in _AVATAR_TRIGGERS)
+
+    if is_avatar_request:
+        # Extraer el sujeto si lo hay: "hazme un avatar de goku" → "goku"
+        for prep in ["de ", "como ", "estilo ", "tipo ", "siendo "]:
+            if prep in content_lower:
+                idx = content_lower.index(prep) + len(prep)
+                avatar_subject = content[idx:].strip()
+                break
+
         async with message.channel.typing():
             await server_agent.generate_avatar_for(
                 user_id=user_id,
                 display_name=display_name,
                 channel=message.channel,
+                subject=avatar_subject,
             )
         return
 
+    # Caso 2: el último action fue avatar y mandan un nombre/estilo corto
+    # ej: reciben su avatar y luego dicen "goku" o "cyberpunk"
+    if (
+        server_agent.last_action.get(user_id) == "avatar"
+        and len(content.split()) <= 5
+        and not content.endswith("?")
+    ):
+        async with message.channel.typing():
+            await server_agent.generate_avatar_for(
+                user_id=user_id,
+                display_name=display_name,
+                channel=message.channel,
+                subject=content,
+            )
+        return
+
+    # ── Conversación normal ──────────────────────────────────
     async with message.channel.typing():
         result = await process_message(user_id, content, display_name)
 
@@ -127,6 +148,9 @@ async def on_message(message):
 
 async def process_message(user_id: str, message: str, display_name: str = "tú") -> dict:
     logger.info(f"Mensaje de {display_name} ({user_id}): {message}")
+
+    # Limpiar last_action al volver a conversación normal
+    server_agent.last_action.pop(user_id, None)
 
     profile   = await profile_manager.get_or_create_profile(user_id)
     modifiers = profile_manager.get_behavior_modifiers(profile)
@@ -243,17 +267,18 @@ async def estado_cmd(ctx):
 
 
 @bot.command(name="avatar")
-async def avatar_cmd(ctx):
-    """Genera un avatar personalizado para quien ejecuta el comando."""
+async def avatar_cmd(ctx, *, subject: str = None):
+    """Genera un avatar. Uso: !avatar o !avatar goku"""
     await server_agent.generate_avatar_for(
         user_id=str(ctx.author.id),
         display_name=ctx.author.display_name,
         channel=ctx.channel,
+        subject=subject,
     )
 
 
 # ============================================================
-# ARRANQUE — FastAPI + Bot en un solo event loop
+# ARRANQUE
 # ============================================================
 
 from api.app import app as fastapi_app
@@ -283,14 +308,13 @@ async def _start_bot_with_retry():
             break
         except discord.errors.HTTPException as e:
             if e.status == 429:
-                logger.warning(f"Rate limit al conectar. Reintentando en {delay}s...")
+                logger.warning(f"Rate limit. Reintentando en {delay}s...")
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 120)
             else:
-                logger.error(f"Error HTTP de Discord: {e}")
                 raise
         except Exception as e:
-            logger.error(f"Error inesperado al conectar bot: {e}")
+            logger.error(f"Error al conectar bot: {e}")
             raise
 
 
