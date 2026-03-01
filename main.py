@@ -4,9 +4,13 @@
 # ============================================================
 
 import os
+import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+import uvicorn
 
 from utils.logger import logger
 from storage.database import Database
@@ -201,11 +205,60 @@ async def estado_cmd(ctx):
 
 
 # ============================================================
-# ARRANQUE
+# ARRANQUE — FastAPI + Bot en un solo event loop
 # ============================================================
 
-if __name__ == "__main__":
+# Importa el router de tu API existente
+from api.app import app as fastapi_app
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Arranca el bot de Discord junto con FastAPI, sin bloquear."""
     if not TOKEN:
-        print("❌ No encontré el token. Crea un .env con DISCORD_TOKEN=tu_token")
-    else:
-        bot.run(TOKEN)
+        print("❌ No encontré DISCORD_TOKEN en las variables de entorno.")
+        yield
+        return
+
+    # Intenta conectar con backoff por si hay rate limit al arrancar
+    bot_task = asyncio.create_task(_start_bot_with_retry())
+    yield
+    # Al apagar Railway, cierra el bot limpiamente
+    await bot.close()
+    bot_task.cancel()
+    try:
+        await bot_task
+    except asyncio.CancelledError:
+        pass
+
+
+async def _start_bot_with_retry():
+    """Conecta el bot con reintentos exponenciales para sobrevivir 429s."""
+    delay = 5
+    while True:
+        try:
+            await bot.start(TOKEN)
+            break  # si termina limpiamente, salimos
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                logger.warning(f"Rate limit al conectar. Reintentando en {delay}s...")
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 120)  # backoff hasta 2 minutos máximo
+            else:
+                logger.error(f"Error HTTP de Discord: {e}")
+                raise
+        except Exception as e:
+            logger.error(f"Error inesperado al conectar bot: {e}")
+            raise
+
+
+# Registra el lifespan en la app de FastAPI
+fastapi_app.router.lifespan_context = lifespan
+
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:fastapi_app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8000)),
+        log_level="info",
+    )
