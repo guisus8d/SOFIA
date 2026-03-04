@@ -646,13 +646,14 @@
                   <th>Timestamp</th>
                   <th>User ID</th>
                   <th>Mensaje</th>
+                  <th>Respuesta Sofía</th>
                   <th>Sentimiento</th>
                   <th>Emoción antes</th>
                   <th>Emoción después</th>
                 </tr>
               </thead>
               <tbody id="inter-tbody">
-                <tr><td colspan="6" class="empty">Cargando...</td></tr>
+                <tr><td colspan="7" class="empty">Cargando...</td></tr>
               </tbody>
             </table>
           </div>
@@ -873,11 +874,11 @@
     }
     function mockInteractions() {
       return [
-        { id: 1, timestamp: '2025-01-15T21:55:00', user_id: '567890123456789012', message: 'hola sofi qué haces', sentiment: 0.8, emotion_before: 'neutral', emotion_after: 'happy' },
-        { id: 2, timestamp: '2025-01-15T20:30:00', user_id: '123456789012345678', message: 'me aburro mucho hoy', sentiment: 0.2, emotion_before: 'happy', emotion_after: 'neutral' },
-        { id: 3, timestamp: '2025-01-15T18:10:00', user_id: '234567890123456789', message: 'tuve un día horrible', sentiment: -0.5, emotion_before: 'neutral', emotion_after: 'sad' },
-        { id: 4, timestamp: '2025-01-14T09:00:00', user_id: '345678901234567890', message: 'respóndeme rápido', sentiment: -0.1, emotion_before: 'sad', emotion_after: 'sad' },
-        { id: 5, timestamp: '2025-01-13T22:00:00', user_id: '456789012345678901', message: '...', sentiment: -0.3, emotion_before: 'angry', emotion_after: 'angry' },
+        { id: 1, timestamp: '2025-01-15T21:55:00', user_id: '567890123456789012', message: 'hola sofi qué haces', response: '¡Hola! ¿Cómo estás? 😊', sentiment: 0.8, emotion_before: 'neutral', emotion_after: 'happy' },
+        { id: 2, timestamp: '2025-01-15T20:30:00', user_id: '123456789012345678', message: 'me aburro mucho hoy', response: 'Mm… ¿qué te haría sentir menos aburrido ahorita?', sentiment: 0.2, emotion_before: 'happy', emotion_after: 'neutral' },
+        { id: 3, timestamp: '2025-01-15T18:10:00', user_id: '234567890123456789', message: 'tuve un día horrible', response: 'Oye, para. Eso que dijiste importa. ¿Cuánto tiempo llevas así?', sentiment: -0.5, emotion_before: 'neutral', emotion_after: 'sad' },
+        { id: 4, timestamp: '2025-01-14T09:00:00', user_id: '345678901234567890', message: 'respóndeme rápido', response: 'Aquí estoy. ¿Qué pasó?', sentiment: -0.1, emotion_before: 'sad', emotion_after: 'sad' },
+        { id: 5, timestamp: '2025-01-13T22:00:00', user_id: '456789012345678901', message: '...', response: 'Mm.', sentiment: -0.3, emotion_before: 'angry', emotion_after: 'angry' },
       ];
     }
     // ────────────────────────────────────────────────────────────
@@ -913,14 +914,22 @@
       }
 
       logEl.innerHTML = interactions.slice(0,15).map(i => {
-        const ts = new Date(i.timestamp).toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' });
-        const uid = i.user_id.slice(-6);
-        const msg = (i.message || '').slice(0, 60);
+        const ts   = new Date(i.timestamp).toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' });
+        const uid  = i.user_id.slice(-6);
+        const msg  = (i.message  || '').slice(0, 55);
+        const resp = (i.response || '').slice(0, 55);
+        const respLine = resp
+          ? `<div class="log-line" style="margin-top:0.1rem">
+              <span class="log-time"></span>
+              <span style="color:var(--blue);font-size:0.6rem;min-width:64px">sofía</span>
+              <span class="log-msg" style="color:var(--cyan)">${escHtml(resp)}</span>
+            </div>`
+          : '';
         return `<div class="log-line">
           <span class="log-time">${ts}</span>
           <span class="log-user">usr_${uid}</span>
           <span class="log-msg">${escHtml(msg)}</span>
-        </div>`;
+        </div>${respLine}`;
       }).join('') + '<div class="log-sys" style="margin-top:0.5rem">// fin del log</div>';
     }
 
@@ -966,7 +975,7 @@
     // ============================================================
     async function loadInteracciones() {
       const tbody = document.getElementById('inter-tbody');
-      tbody.innerHTML = '<tr><td colspan="6" class="empty"><span class="loading"></span>Cargando...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty"><span class="loading"></span>Cargando...</td></tr>';
 
       let interactions;
       try {
@@ -978,19 +987,21 @@
       document.getElementById('inter-count').textContent = `${interactions.length} registros`;
 
       if (!interactions.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty">Sin interacciones</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="empty">Sin interacciones</td></tr>';
         return;
       }
 
       tbody.innerHTML = interactions.map(i => {
-        const ts  = new Date(i.timestamp).toLocaleString('es-MX');
-        const msg = (i.message || '').slice(0, 60) + ((i.message || '').length > 60 ? '…' : '');
-        const uid = i.user_id.slice(-8);
+        const ts   = new Date(i.timestamp).toLocaleString('es-MX');
+        const msg  = (i.message  || '').slice(0, 60) + ((i.message  || '').length > 60 ? '…' : '');
+        const resp = (i.response || '').slice(0, 70) + ((i.response || '').length > 70 ? '…' : '');
+        const uid  = i.user_id.slice(-8);
         const sentColor = i.sentiment >= 0.3 ? 'var(--green)' : i.sentiment <= -0.2 ? 'var(--red)' : 'var(--muted)';
         return `<tr>
           <td style="font-size:0.62rem;color:var(--muted)">${ts}</td>
           <td style="font-size:0.65rem;color:var(--muted)">…${uid}</td>
-          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(msg)}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(msg)}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cyan);font-size:0.68rem">${resp ? escHtml(resp) : '<span style="color:var(--muted)">—</span>'}</td>
           <td style="color:${sentColor}">${i.sentiment != null ? i.sentiment.toFixed(2) : '—'}</td>
           <td>${emotionBadge(i.emotion_before)}</td>
           <td>${emotionBadge(i.emotion_after)}</td>
